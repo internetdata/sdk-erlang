@@ -63,17 +63,17 @@ assert_attempts(#{<<"status">> := Status, <<"headers">> := Headers, <<"body">> :
     ?assertEqual(Expected, internetdata_stub:calls(Stub)),
     internetdata_stub:stop(Stub).
 
-%% `standing' and `redistribution' are documented as open sets. A client that
+%% `standing' and `license_type' are documented as open sets. A client that
 %% narrowed either into a closed type would drop a value added later, and the
 %% dropped one is always the interesting one.
-every_standing_and_redistribution_survives_the_mapper_test() ->
+every_standing_and_license_type_survives_the_mapper_test() ->
     Standings = corpus(<<"standings">>),
-    %% `null' belongs in the sweep: it is what redistribution is when there is no
+    %% `null' belongs in the sweep: it is what license_type is when there is no
     %% license at all, which is the commonest value in a real listing.
-    Redistributions = [null | corpus(<<"redistribution">>)],
-    Wire = [family(<<Standing/binary, "_", (label(Redistribution))/binary>>,
-                   Standing, Redistribution)
-            || Standing <- Standings, Redistribution <- Redistributions],
+    LicenseTypes = [null | corpus(<<"license_type">>)],
+    Wire = [family(<<Standing/binary, "_", (label(LicenseType))/binary>>,
+                   Standing, LicenseType)
+            || Standing <- Standings, LicenseType <- LicenseTypes],
     Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => Wire}}}),
     Client = client(Stub, #{}),
 
@@ -82,8 +82,8 @@ every_standing_and_redistribution_survives_the_mapper_test() ->
     ?assertEqual(length(Wire), length(Databases)),
     ?assertEqual(lists:usort(Standings),
                  lists:usort([maps:get(standing, D) || D <- Databases])),
-    ?assertEqual(lists:usort(Redistributions),
-                 lists:usort([maps:get(redistribution, D) || D <- Databases])),
+    ?assertEqual(lists:usort(LicenseTypes),
+                 lists:usort([maps:get(license_type, D) || D <- Databases])),
     internetdata_stub:stop(Stub).
 
 every_format_reaches_the_wire_as_written_test_() ->
@@ -106,7 +106,7 @@ format(<<"csvgz">>) -> csvgz;
 format(<<"mmdb">>) -> mmdb.
 
 label(null) -> <<"none">>;
-label(Redistribution) -> Redistribution.
+label(LicenseType) -> LicenseType.
 
 %% A `private' dataset is ABSENT from a listing for an organization with no grant
 %% on it, rather than present with an `unlicensed' standing. The server decides
@@ -133,7 +133,7 @@ visibility_test_() ->
 a_listing_is_returned_as_served() ->
     Wire = [family(<<"bogon_ip">>, <<"licensed">>, <<"redistribute">>),
             family(<<"vpn_ip">>, <<"unlicensed">>, null),
-            family(<<"a_family_named_only_by_the_server">>, <<"licensed">>, <<"internal">>)],
+            family(<<"a_family_named_only_by_the_server">>, <<"licensed">>, <<"standard">>)],
     Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => Wire}}}),
     Client = client(Stub, #{}),
 
@@ -159,7 +159,7 @@ a_listing_is_not_reused() ->
     OneStub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> =>
         [family(<<"bogon_ip">>, <<"licensed">>, <<"redistribute">>)]}}}),
     TwoStub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> =>
-        [family(<<"vpn_ip">>, <<"licensed">>, <<"internal">>)]}}}),
+        [family(<<"vpn_ip">>, <<"licensed">>, <<"standard">>)]}}}),
     One = client(OneStub, #{}),
     Two = client(TwoStub, #{}),
 
@@ -175,13 +175,13 @@ a_listing_is_not_reused() ->
     internetdata_stub:stop(OneStub),
     internetdata_stub:stop(TwoStub).
 
-family(Base, Standing, Redistribution) ->
+family(Base, Standing, LicenseType) ->
     #{
         <<"base">> => Base,
         <<"name">> => Base,
         <<"summary">> => <<"a family">>,
         <<"standing">> => Standing,
-        <<"redistribution">> => Redistribution,
+        <<"license_type">> => LicenseType,
         <<"starts">> => null,
         <<"expires">> => null,
         <<"versions">> => [#{<<"id">> => <<Base/binary, "_v1">>, <<"version">> => 1,

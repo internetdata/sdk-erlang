@@ -43,7 +43,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. The client is a plain term 
  end || D <- Databases].
 ```
 
-`standing` is `<<"licensed">>` for a live grant, `<<"expired">>` for one whose term has ended, and `<<"unlicensed">>` for a database published but never bought. `redistribution` says what your license permits you to do with the data, and is `null` when there is no license.
+`standing` is `<<"licensed">>` for a live grant, `<<"expired">>` for one whose term has ended, and `<<"unlicensed">>` for a database published but never bought. `license_type` says what your license permits you to do with the data, and is `null` when there is no license.
 
 A license covers a family (`bogon_ip`), while a download names one of its versions (`bogon_ip_v1`), so the ids the other calls take come from a family's `versions` rather than from the family itself. Old versions are frozen rather than migrated, so both stay downloadable.
 

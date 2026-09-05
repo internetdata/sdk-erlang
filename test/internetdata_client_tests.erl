@@ -212,7 +212,7 @@ family() ->
         <<"name">> => <<"Bogon IP">>,
         <<"summary">> => <<"Unroutable address space">>,
         <<"standing">> => <<"licensed">>,
-        <<"redistribution">> => <<"redistribute">>,
+        <<"license_type">> => <<"redistribute">>,
         <<"starts">> => <<"2026-01-01T00:00:00.000Z">>,
         <<"expires">> => null,
         <<"versions">> => [#{<<"id">> => <<"bogon_ip_v1">>, <<"version">> => 1,

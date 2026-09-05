@@ -45,8 +45,8 @@ assert_family(Family) ->
     ?assert(is_binary(maps:get(name, Family, missing))),
     ?assert(lists:member(maps:get(standing, Family, missing),
                          [<<"licensed">>, <<"expired">>, <<"unlicensed">>])),
-    ?assert(lists:member(maps:get(redistribution, Family, missing),
-                         [null, <<"evaluation">>, <<"internal">>, <<"redistribute">>])),
+    ?assert(lists:member(maps:get(license_type, Family, missing),
+                         [null, <<"evaluation">>, <<"standard">>, <<"redistribute">>])),
     Versions = maps:get(versions, Family, []),
     ?assertNotEqual({Base, []}, {Base, Versions}),
     [begin

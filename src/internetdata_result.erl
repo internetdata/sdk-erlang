@@ -54,7 +54,7 @@ key(database, <<"base">>) -> base;
 key(database, <<"name">>) -> name;
 key(database, <<"summary">>) -> summary;
 key(database, <<"standing">>) -> standing;
-key(database, <<"redistribution">>) -> redistribution;
+key(database, <<"license_type">>) -> license_type;
 key(database, <<"starts">>) -> starts;
 key(database, <<"expires">>) -> expires;
 key(database, <<"versions">>) -> versions;
@@ -88,7 +88,7 @@ key(download, <<"created">>) -> created;
 key(_Context, _Name) -> undefined.
 
 %% VALUES are never turned into atoms either, however closed the spec's enum
-%% looks: `standing', `redistribution', `outcome' and `format' are all documented
+%% looks: `standing', `license_type', `outcome' and `format' are all documented
 %% as open on purpose, so a value added later stays readable by a client written
 %% today. They arrive as binaries and stay that way.
 child(database, <<"versions">>, Versions) when is_list(Versions) ->
