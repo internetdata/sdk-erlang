@@ -1,4 +1,4 @@
-# [<img src="https://docs.internetdata.io/logo.svg" alt="InternetData" width="24"/>](https://internetdata.io/) InternetData Erlang Client Library
+# [<img src="https://s3.internetdata.io/internetdata-public/brand/mark.svg" alt="InternetData" width="24"/>](https://internetdata.io/) InternetData Erlang Client Library
 
 [![hex.pm](https://img.shields.io/hexpm/v/internetdata.svg)](https://hex.pm/packages/internetdata)
 [![license](https://img.shields.io/hexpm/l/internetdata.svg)](LICENSE)
@@ -142,7 +142,7 @@ There are official InternetData client libraries available for many languages in
 
 IP, ASN and Domain data to reveal unique insights about the internet. APIs, Databases and Live Feeds available.
 
-[<img src="https://docs.internetdata.io/logo.svg" alt="InternetData" width="96"/>](https://internetdata.io/)
+[<img src="https://s3.internetdata.io/internetdata-public/brand/mark.svg" alt="InternetData" width="96"/>](https://internetdata.io/)
 
 ## License
 
