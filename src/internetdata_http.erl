@@ -256,6 +256,8 @@ transfer_request(#{timeout_ms := TimeoutMs, user_agent := Agent}, Url) ->
     #{method => get, url => Url, timeout_ms => TimeoutMs,
       headers => [{<<"accept">>, <<"*/*">>}, {<<"user-agent">>, Agent}]}.
 
+headers(#{api_key := undefined, user_agent := Agent}) ->
+    [{<<"accept">>, <<"application/json">>}, {<<"user-agent">>, Agent}];
 headers(#{api_key := Key, user_agent := Agent}) ->
     [{<<"accept">>, <<"application/json">>}, {<<"user-agent">>, Agent},
      {<<"authorization">>, <<"Bearer ", Key/binary>>}].

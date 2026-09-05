@@ -9,11 +9,25 @@
 -define(CHECKSUM_PATH, <<"/api/v2/database/checksum">>).
 -define(DOWNLOADS_PATH, <<"/api/v2/database/downloads">>).
 
-%% Every endpoint here is authenticated, so a client without a key could only
-%% ever answer 401. Failing at construction says so once instead of once per
-%% call.
-a_client_without_a_key_is_a_programming_error_test() ->
-    ?assertError({missing_option, api_key}, internetdata:new(#{})).
+%% Today every endpoint is authenticated, so a keyless client only ever gets a
+%% 401. It still has to BUILD and to send no credential at all: an empty key is
+%% what a missing CI secret interpolates to, and `Bearer ' with nothing behind it
+%% is a worse answer than no header.
+a_keyless_client_sends_no_authorization_header_test() ->
+    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => []}}}),
+    [begin
+         Client = internetdata:new(Options#{http => internetdata_stub:http(Stub)}),
+         {ok, []} = internetdata:database_list(Client)
+     end || Options <- [#{}, #{api_key => <<>>}, #{api_key => ""}]],
+
+    [?assertEqual(false, lists:keyfind(<<"authorization">>, 1, Headers))
+     || Headers <- internetdata_stub:headers_seen(Stub)],
+    ?assertEqual(3, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+%% `new/0' is production with no key, which is the whole of the keyless surface.
+new_with_no_options_at_all_builds_test() ->
+    ?assertMatch(#{api_key := undefined}, internetdata:new()).
 
 %% Deleting the auth header, or sending it under the wrong scheme, passed a whole
 %% suite in another language until something mutated it.

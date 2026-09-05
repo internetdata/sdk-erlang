@@ -18,7 +18,7 @@ Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything t
 
 ## Usage
 
-Every endpoint is authenticated, so a client needs an API key. Create one in the [console](https://app.internetdata.io) with the `db.download` scope; keys are default-deny, so an existing key does not gain database access until that scope is added to it.
+Every endpoint published today is authenticated, so a client needs an API key. Create one in the [console](https://app.internetdata.io) with the `db.download` scope; keys are default-deny, so an existing key does not gain database access until that scope is added to it. `api_key` is nevertheless OPTIONAL: `internetdata:new()` builds a client that sends no `authorization` header at all, ready for a dataset served without a licence.
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),

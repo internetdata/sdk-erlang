@@ -17,7 +17,7 @@
 %% not assemble a catalog from anywhere else.
 -module(internetdata).
 
--export([new/1]).
+-export([new/0, new/1]).
 -export([database_list/1, database_metadata/2, database_checksums/3,
          database_downloads/1, database_downloads/2, database_download_url/3,
          database_download/4, database_download_bytes/3]).
@@ -30,7 +30,7 @@
 
 -opaque client() :: #{
     base_url := binary(),
-    api_key := binary(),
+    api_key := binary() | undefined,
     retries := non_neg_integer(),
     timeout_ms := pos_integer(),
     user_agent := binary(),
@@ -38,7 +38,7 @@
 }.
 
 -type options() :: #{
-    api_key := binary() | string(),
+    api_key => binary() | string(),
     base_url => binary() | string(),
     retries => non_neg_integer(),
     timeout_ms => pos_integer(),
@@ -48,12 +48,22 @@
 -type downloads_options() :: #{limit => pos_integer()}.
 -type format() :: csvgz | mmdb.
 
+%% @doc Build a client against production with no key.
+-spec new() -> client().
+new() ->
+    new(#{}).
+
 %% @doc Build a client.
 %%
-%% `api_key' is required: every endpoint here is authenticated, so a client built
-%% without one could only ever answer 401. Create a key in the console with the
-%% `db.download' scope. Keys are default-deny, so an existing key does not gain
-%% database access until that scope is added to it.
+%% `api_key' is optional. Every endpoint published today is authenticated, so a
+%% client built without one answers 401 - but that is what the API serves rather
+%% than a property of its shape, and a client that could not be BUILT without a
+%% key would have to break its own signature the day a dataset is served free.
+%% Without one no `authorization' header is sent at all.
+%%
+%% Create a key in the console with the `db.download' scope. Keys are
+%% default-deny, so an existing key does not gain database access until that
+%% scope is added to it.
 -spec new(options()) -> client().
 new(Options) ->
     case maps:is_key(http, Options) of
@@ -250,13 +260,17 @@ unwrap({ok, Body}, Key) ->
 unwrap({error, Error}, _Key) ->
     {error, Error}.
 
-%% A missing key is the caller's mistake rather than the API's, and every call
-%% this client makes needs one, so it fails here instead of turning every request
-%% into a 401.
+%% Empty counts as absent, so a `${{ secrets.MISSING }}' that interpolated to
+%% nothing presents no credential rather than a bearer token of one space.
+%% Whether the key reached the wire is asserted in the suites.
 api_key(Options) ->
     case maps:get(api_key, Options, undefined) of
-        undefined -> error({missing_option, api_key});
-        Key -> bin(Key)
+        undefined -> undefined;
+        Key ->
+            case bin(Key) of
+                <<>> -> undefined;
+                Bin -> Bin
+            end
     end.
 
 user_agent() ->
