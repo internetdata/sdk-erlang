@@ -1,4 +1,4 @@
-# [<img src="https://s3.internetdata.io/internetdata-public/brand/mark.svg" alt="InternetData" width="24"/>](https://internetdata.io/) InternetData Erlang Client Library
+# [<img src="https://s3.internetdata.io/internetdata-public/brand/mark.svg" alt="InternetData" height="28"/>](https://internetdata.io/) InternetData Erlang Client Library
 
 [![hex.pm](https://img.shields.io/hexpm/v/internetdata.svg)](https://hex.pm/packages/internetdata)
 [![license](https://img.shields.io/hexpm/l/internetdata.svg)](LICENSE)
