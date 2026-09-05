@@ -1,0 +1,13 @@
+{application, internetdata,
+ [{description, "Official Erlang client for the InternetData database API: browse the "
+                "licensed catalog and download IP, ASN and domain datasets"},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [kernel, stdlib, inets, ssl, public_key]},
+  {env, []},
+  {modules, []},
+  {licenses, ["MIT"]},
+  {links, [{"GitHub", "https://github.com/internetdata/sdk-erlang"},
+           {"Website", "https://internetdata.io"},
+           {"Docs", "https://docs.internetdata.io"}]}
+ ]}.
