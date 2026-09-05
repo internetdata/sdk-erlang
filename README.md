@@ -47,8 +47,6 @@ Every call answers `{ok, Term}` or `{error, Error}`. The client is a plain term 
 
 A license covers a family (`bogon_ip`), while a download names one of its versions (`bogon_ip_v1`), so the ids the other calls take come from a family's `versions` rather than from the family itself. Old versions are frozen rather than migrated, so both stay downloadable.
 
-**The catalog is not the same for everyone.** A database commissioned for a single customer is simply absent from your listing rather than shown with an `unlicensed` standing, so read the listing this client returns: do not hold on to one and reuse it under a different key, and do not assemble a catalog from anywhere else.
-
 ### What is in a database
 
 `database_metadata/2` describes one version without downloading any of it, so it is cheap to poll and it is what to check a transfer against before starting one:
