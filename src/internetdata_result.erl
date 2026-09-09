@@ -57,6 +57,8 @@ key(database, <<"standing">>) -> standing;
 key(database, <<"license_type">>) -> license_type;
 key(database, <<"starts">>) -> starts;
 key(database, <<"expires">>) -> expires;
+key(database, <<"renews_at">>) -> renews_at;
+key(database, <<"notice_due_at">>) -> notice_due_at;
 key(database, <<"versions">>) -> versions;
 key(version, <<"id">>) -> id;
 key(version, <<"version">>) -> version;
