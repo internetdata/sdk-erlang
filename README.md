@@ -14,7 +14,7 @@ The library helps you browse the datasets your organization licenses and downloa
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.0"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.3"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
