@@ -8,6 +8,7 @@
 -define(METADATA_PATH, <<"/api/v2/database/metadata">>).
 -define(CHECKSUM_PATH, <<"/api/v2/database/checksum">>).
 -define(DOWNLOADS_PATH, <<"/api/v2/database/downloads">>).
+-define(DOWNLOAD_PATH, <<"/api/v2/database/download">>).
 
 %% Today every endpoint is authenticated, so a keyless client only ever gets a
 %% 401. It still has to BUILD and to send no credential at all: an empty key is
@@ -205,6 +206,53 @@ a_body_that_is_not_json_is_not_a_crash_test() ->
     ?assertMatch({error, #{kind := server_error, retryable := false}},
                  internetdata:database_list(Client)),
     internetdata_stub:stop(Stub).
+
+%% `format()' checks nothing once compiled, so an atom from a flag or a config
+%% file has to be refused at runtime, before it costs a request.
+an_unpublished_format_is_refused_before_any_request_test() ->
+    Stub = internetdata_stub:start(#{}),
+    Client = client(Stub),
+    Dir = list_to_binary(os:getenv("TMPDIR", "/tmp")),
+    Path = <<Dir/binary, "/internetdata-", (integer_to_binary(erlang:unique_integer([positive])))/binary,
+             "-refused.mmdb">>,
+    Calls = [
+        fun(F) -> internetdata:database_checksums(Client, <<"bogon_ip_v1">>, F) end,
+        fun(F) -> internetdata:database_download_url(Client, <<"bogon_ip_v1">>, F) end,
+        fun(F) -> internetdata:database_download(Client, <<"bogon_ip_v1">>, F, Path) end,
+        fun(F) -> internetdata:database_download_bytes(Client, <<"bogon_ip_v1">>, F) end
+    ],
+
+    [?assertMatch({Format, {error, #{kind := bad_request, retryable := false}}},
+                  {Format, Call(Format)})
+     || Format <- [zip, 'MMDB', <<"mmdb">>, "csvgz"], Call <- Calls],
+    ?assertEqual(0, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+%% The runtime list is written by hand, so it is pinned to the committed spec: a
+%% format the spec gains fails here on the re-pin rather than being refused.
+every_format_the_pinned_spec_publishes_is_accepted_test() ->
+    Published = spec_formats(),
+    ?assertNotEqual([], Published),
+    Stub = internetdata_stub:start(#{?DOWNLOAD_PATH =>
+        #{status => 302, headers => #{<<"Location">> => <<"https://storage.example/f">>}}}),
+    Client = client(Stub),
+
+    [?assertEqual({Format, {ok, <<"https://storage.example/f">>}},
+                  {Format, internetdata:database_download_url(Client, <<"bogon_ip_v1">>,
+                                                              binary_to_atom(Format))})
+     || Format <- Published],
+    ?assertEqual(length(Published), internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+%% The `DatabaseFormat' enum, read by line because OTP ships no YAML parser. The
+%% schema's body is every line indented past its name, so another schema's enum
+%% cannot be read in its place.
+spec_formats() ->
+    {ok, Yaml} = file:read_file("spec/openapi.yaml"),
+    [_ | Rest] = lists:dropwhile(fun(Line) -> Line =/= <<"    DatabaseFormat:">> end,
+                                 binary:split(Yaml, <<"\n">>, [global])),
+    Schema = lists:takewhile(fun(Line) -> binary:match(Line, <<"      ">>) =:= {0, 6} end, Rest),
+    [Format || <<"        - ", Format/binary>> <- Schema].
 
 family() ->
     #{

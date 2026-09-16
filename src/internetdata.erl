@@ -47,6 +47,8 @@
 
 -type downloads_options() :: #{limit => pos_integer()}.
 -type format() :: csvgz | mmdb.
+%% The same set at runtime, because `format()' checks nothing once compiled.
+-define(FORMATS, [csvgz, mmdb]).
 
 %% @doc Build a client against production with no key.
 -spec new() -> client().
@@ -120,10 +122,15 @@ database_metadata(Client, Id) ->
 -spec database_checksums(client(), binary() | string(), format()) ->
     {ok, map()} | {error, internetdata_error:error()}.
 database_checksums(Client, Id, Format) ->
-    Query = [{<<"id">>, bin(Id)}, {<<"format">>, atom_to_binary(Format)}],
-    case unwrap(get_json(Client, <<"/api/v2/database/checksum">>, Query), <<"checksums">>) of
-        {ok, Checksums} -> {ok, internetdata_result:checksums(Checksums)};
-        {error, Error} -> {error, Error}
+    case format_name(Format) of
+        {ok, Name} ->
+            Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name}],
+            case unwrap(get_json(Client, <<"/api/v2/database/checksum">>, Query), <<"checksums">>) of
+                {ok, Checksums} -> {ok, internetdata_result:checksums(Checksums)};
+                {error, Error} -> {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 -spec database_downloads(client()) -> {ok, [map()]} | {error, internetdata_error:error()}.
@@ -156,9 +163,14 @@ database_downloads(Client, Options) ->
 -spec database_download_url(client(), binary() | string(), format()) ->
     {ok, binary()} | {error, internetdata_error:error()}.
 database_download_url(Client, Id, Format) ->
-    Query = [{<<"id">>, bin(Id)}, {<<"format">>, atom_to_binary(Format)}],
-    internetdata_http:get_redirect(Client, <<"/api/v2/database/download">>, Query,
-                                   maps:get(retries, Client)).
+    case format_name(Format) of
+        {ok, Name} ->
+            Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name}],
+            internetdata_http:get_redirect(Client, <<"/api/v2/database/download">>, Query,
+                                           maps:get(retries, Client));
+        {error, Error} ->
+            {error, Error}
+    end.
 
 %% @doc Download one dataset file to `Path', and answer how many bytes landed.
 %%
@@ -250,6 +262,19 @@ message(Path, Reason) ->
 
 get_json(Client, Path, Query) ->
     internetdata_http:get_json(Client, Path, Query, maps:get(retries, Client)).
+
+%% An unpublished format is refused here rather than sent, where it would cost a
+%% round trip and come back a 400 naming nothing the caller can act on.
+format_name(Format) ->
+    case lists:member(Format, ?FORMATS) of
+        true ->
+            {ok, atom_to_binary(Format)};
+        false ->
+            Message = io_lib:format("~p is not a published format; expected one of ~p",
+                                    [Format, ?FORMATS]),
+            {error, #{kind => bad_request, retryable => false,
+                      message => iolist_to_binary(Message)}}
+    end.
 
 unwrap({ok, Body}, Key) ->
     case Body of
