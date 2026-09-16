@@ -81,6 +81,22 @@ a_download_url_is_returned_without_being_followed_test_() ->
 %% A body that stops short of its declared content-length is the failure that
 %% costs the most when it is silent: the file looks like a dataset, parses as a
 %% dataset, and is missing rows nobody asked about.
+%% Before any byte reaches the sink there is nothing to undo, so object storage
+%% failing then is an outage like any other and the client's retries apply.
+object_storage_failing_before_the_body_is_retried_test_() ->
+    {timeout, 60, fun() ->
+        {Origin, Client} = origin(),
+        Path = scratch("flaky.csv.gz"),
+
+        Result = internetdata:database_download(Client, <<"flaky">>, csvgz, Path),
+
+        ?assertEqual(2, internetdata_origin:hits(Origin, <<"/flaky">>)),
+        Payload = internetdata_origin:payload(),
+        ?assertEqual({ok, byte_size(Payload)}, Result),
+        ?assertEqual({ok, Payload}, file:read_file(Path)),
+        done(Origin, Path)
+    end}.
+
 a_truncated_transfer_fails_and_leaves_nothing_behind_test_() ->
     {timeout, 60, fun() ->
         {Origin, Client} = origin(),

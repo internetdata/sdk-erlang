@@ -21,6 +21,7 @@
 -export([database_list/1, database_metadata/2, database_checksums/3,
          database_downloads/1, database_downloads/2, database_download_url/3,
          database_download/4, database_download_bytes/3]).
+-export([database_formats/0, standings/0, license_types/0]).
 
 -export_type([client/0, options/0, downloads_options/0, format/0]).
 
@@ -80,6 +81,23 @@ new(Options) ->
         user_agent => user_agent(),
         http => maps:get(http, Options, internetdata_http:httpc_fun())
     }.
+
+%% @doc Every format a database file is published in: the values `format()' takes,
+%% for checking one that came from a flag or a config file.
+-spec database_formats() -> [format()].
+database_formats() ->
+    ?FORMATS.
+
+%% @doc Every `standing' the pinned spec publishes for a family in
+%% {@link database_list/1}. A value added later still reads through as a binary.
+-spec standings() -> [binary()].
+standings() ->
+    [<<"licensed">>, <<"expired">>, <<"unlicensed">>].
+
+%% @doc Every `license_type' the pinned spec publishes when it is not `null'.
+-spec license_types() -> [binary()].
+license_types() ->
+    [<<"evaluation">>, <<"standard">>, <<"redistribute">>].
 
 %% @doc Every dataset FAMILY your organization may see, and where each one
 %% stands.

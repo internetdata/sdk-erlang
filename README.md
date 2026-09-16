@@ -14,7 +14,7 @@ The library helps you browse the datasets your organization licenses and downloa
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.3"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.4"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
@@ -43,7 +43,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. The client is a plain term 
  end || D <- Databases].
 ```
 
-`standing` is `<<"licensed">>` for a live grant, `<<"expired">>` for one whose term has ended, and `<<"unlicensed">>` for a database published but never bought. `license_type` says what your license permits you to do with the data, and is `null` when there is no license.
+`standing` is `<<"licensed">>` for a live grant, `<<"expired">>` for one whose term has ended, and `<<"unlicensed">>` for a database published but never bought. `license_type` says what your license permits you to do with the data, and is `null` when there is no license. `internetdata:standings()` and `internetdata:license_types()` list the values each can take, and `internetdata:database_formats()` the formats a download takes, for checking one that came from a flag or a config file.
 
 A license covers a family (`bogon_ip`), while a download names one of its versions (`bogon_ip_v1`), so the ids the other calls take come from a family's `versions` rather than from the family itself. Old versions are frozen rather than migrated, so both stay downloadable.
 
@@ -130,7 +130,7 @@ Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are no
 Client = internetdata:new(#{api_key => <<"your-api-key">>, retries => 4, timeout_ms => 60000}).
 ```
 
-`timeout_ms` bounds the wait for a whole request, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size.
+`timeout_ms` bounds the wait for a whole request, body included, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size.
 
 ## Other Libraries
 

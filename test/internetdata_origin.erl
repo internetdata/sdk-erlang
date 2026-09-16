@@ -88,7 +88,11 @@ serve(Socket, Counter, Options) ->
     case read_request(Socket) of
         {ok, Path, Query, Credentialed} ->
             Counter ! {started, Path, Credentialed},
-            respond(Socket, Path, Query, Options),
+            case {maps:find(body_pace, Options), Path} of
+                {{ok, Pace}, _} -> paced(Socket, Pace);
+                {error, <<"/flaky">>} -> flaky(Socket, Counter);
+                {error, _} -> respond(Socket, Path, Query, Options)
+            end,
             gen_tcp:close(Socket);
         error ->
             gen_tcp:close(Socket)
@@ -160,6 +164,40 @@ respond(Socket, <<"/api/v2/database/download">>, Query, Options) ->
 respond(Socket, _Path, _Query, _Options) ->
     send(Socket, 404, [{<<"content-type">>, <<"application/json">>}],
          iolist_to_binary(json:encode(#{<<"rc">> => <<"UNKNOWN_DATASET">>}))).
+
+%% The head goes out at once and the body does not, so a bound that stops at the
+%% headers never sees the stall. `{stall, Ms}' sends half the body and waits;
+%% `{trickle, GapMs}' sends a byte per gap, so no single read waits long.
+paced(Socket, Pace) ->
+    Body = <<"{\"databases\":[]}", (binary:copy(<<" ">>, 400))/binary>>,
+    send(Socket, 200, [{<<"content-type">>, <<"application/json">>},
+                       {<<"content-length">>, integer_to_binary(byte_size(Body))}], <<>>),
+    case Pace of
+        {stall, Ms} ->
+            Half = byte_size(Body) div 2,
+            _ = gen_tcp:send(Socket, binary:part(Body, 0, Half)),
+            timer:sleep(Ms),
+            gen_tcp:send(Socket, binary:part(Body, Half, byte_size(Body) - Half));
+        {trickle, GapMs} ->
+            trickle_bytes(Socket, Body, GapMs)
+    end.
+
+trickle_bytes(_Socket, <<>>, _GapMs) ->
+    ok;
+trickle_bytes(Socket, <<Byte, Rest/binary>>, GapMs) ->
+    case gen_tcp:send(Socket, <<Byte>>) of
+        ok -> timer:sleep(GapMs), trickle_bytes(Socket, Rest, GapMs);
+        {error, _} -> ok
+    end.
+
+%% Object storage failing before the first byte of its first answer, and serving
+%% the dataset to every later one.
+flaky(Socket, Counter) ->
+    case maps:get(<<"/flaky">>, ask(Counter, hits)) of
+        1 -> send(Socket, 503, [{<<"content-type">>, <<"application/xml">>}],
+                  <<"<Error><Code>SlowDown</Code></Error>">>);
+        _ -> respond(Socket, <<"/dataset">>, <<>>, #{})
+    end.
 
 %% The `id' the client asked for doubles as the name of the file the redirect
 %% points at, so one origin serves every download case.

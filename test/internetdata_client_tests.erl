@@ -228,6 +228,24 @@ an_unpublished_format_is_refused_before_any_request_test() ->
     ?assertEqual(0, internetdata_stub:calls(Stub)),
     internetdata_stub:stop(Stub).
 
+%% The bound must cover the BODY: one that stops at the response head lets a body
+%% stalled after its headers run for as long as the server likes.
+a_body_stalled_after_its_headers_is_bounded_test_() ->
+    {timeout, 60, fun() -> assert_body_bounded({stall, 8000}) end}.
+
+%% A byte every 20 ms never leaves one read waiting long, so only a bound on the
+%% whole attempt ends it.
+a_body_trickled_a_byte_at_a_time_is_bounded_test_() ->
+    {timeout, 60, fun() -> assert_body_bounded({trickle, 20}) end}.
+
+%% The runtime lists are written by hand, so each is pinned to the committed spec
+%% in BOTH directions: a value the spec gains or drops fails here on the re-pin.
+the_exported_vocabularies_are_the_pinned_specs_test() ->
+    ?assertEqual(lists:sort(spec_enum(<<"    DatabaseFormat:">>)),
+                 lists:sort([atom_to_binary(F) || F <- internetdata:database_formats()])),
+    ?assertEqual(lists:sort(spec_enum(<<"    Standing:">>)), lists:sort(internetdata:standings())),
+    ?assertEqual(lists:sort(spec_license_types()), lists:sort(internetdata:license_types())).
+
 %% The runtime list is written by hand, so it is pinned to the committed spec: a
 %% format the spec gains fails here on the re-pin rather than being refused.
 every_format_the_pinned_spec_publishes_is_accepted_test() ->
@@ -248,11 +266,45 @@ every_format_the_pinned_spec_publishes_is_accepted_test() ->
 %% schema's body is every line indented past its name, so another schema's enum
 %% cannot be read in its place.
 spec_formats() ->
-    {ok, Yaml} = file:read_file("spec/openapi.yaml"),
-    [_ | Rest] = lists:dropwhile(fun(Line) -> Line =/= <<"    DatabaseFormat:">> end,
-                                 binary:split(Yaml, <<"\n">>, [global])),
+    spec_enum(<<"    DatabaseFormat:">>).
+
+spec_enum(SchemaLine) ->
+    [_ | Rest] = lists:dropwhile(fun(Line) -> Line =/= SchemaLine end, spec_lines()),
     Schema = lists:takewhile(fun(Line) -> binary:match(Line, <<"      ">>) =:= {0, 6} end, Rest),
-    [Format || <<"        - ", Format/binary>> <- Schema].
+    [Value || <<"        - ", Value/binary>> <- Schema].
+
+%% `license_type' is an inline enum on the family, nullable, so `null' is not one
+%% of its values.
+spec_license_types() ->
+    [_ | Rest] = lists:dropwhile(fun(Line) -> Line =/= <<"        license_type:">> end, spec_lines()),
+    Property = lists:takewhile(fun(Line) -> binary:match(Line, <<"          ">>) =:= {0, 10} end, Rest),
+    [Value || <<"            - ", Value/binary>> <- Property, Value =/= <<"null">>].
+
+spec_lines() ->
+    {ok, Yaml} = file:read_file("spec/openapi.yaml"),
+    binary:split(Yaml, <<"\n">>, [global]).
+
+%% The client's bound (1 s) fires on every JSON call, and the elapsed time says it
+%% was that bound rather than the stall ending on its own.
+assert_body_bounded(Pace) ->
+    Origin = internetdata_origin:start(#{body_pace => Pace}),
+    Client = internetdata:new(#{base_url => internetdata_origin:base_url(Origin), api_key => <<"k">>,
+                                retries => 0, timeout_ms => 1000}),
+    Calls = [
+        {database_list, fun() -> internetdata:database_list(Client) end},
+        {database_metadata, fun() -> internetdata:database_metadata(Client, <<"bogon_ip_v1">>) end},
+        {database_downloads, fun() -> internetdata:database_downloads(Client, #{limit => 5}) end}
+    ],
+    [begin
+         {Micros, Answer} = timer:tc(Call),
+         ?assertMatch({Name, {error, #{kind := network, retryable := true}}}, {Name, Answer}),
+         Ms = Micros div 1000,
+         ?assertEqual({Name, within}, {Name, within(Ms, {900, 2500})})
+     end || {Name, Call} <- Calls],
+    internetdata_origin:stop(Origin).
+
+within(Ms, {Low, High}) when Ms >= Low, Ms < High -> within;
+within(Ms, _Window) -> {took_ms, Ms}.
 
 family() ->
     #{
