@@ -14,7 +14,7 @@ The library helps you browse the datasets your organization licenses and downloa
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.4"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.5"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
@@ -96,7 +96,7 @@ Read the checksums after the transfer rather than before it: a build published i
 
 ### Download history
 
-`database_downloads/1` lists your organization's recent download attempts, newest first, refusals included. A denial is what answers "it stopped working", and its absence answers nothing:
+`database_downloads/2` lists your organization's recent download attempts, newest first, refusals included. A denial is what answers "it stopped working", and its absence answers nothing. `limit` defaults to 50 and the API clamps it to 200:
 
 ```erlang
 {ok, Attempts} = internetdata:database_downloads(Client, #{limit => 20}),
@@ -130,7 +130,11 @@ Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are no
 Client = internetdata:new(#{api_key => <<"your-api-key">>, retries => 4, timeout_ms => 60000}).
 ```
 
-`timeout_ms` bounds the wait for a whole request, body included, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size.
+`timeout_ms` bounds the wait for a whole request, body included, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size. It bounds each attempt, so a call that is retried can take longer in total, and `database_downloads/2` takes a `timeout_ms` of its own for that call alone:
+
+```erlang
+{ok, Attempts} = internetdata:database_downloads(Client, #{limit => 20, timeout_ms => 5000}).
+```
 
 ## Other Libraries
 

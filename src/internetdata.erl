@@ -46,7 +46,7 @@
     http => internetdata_http:http_fun()
 }.
 
--type downloads_options() :: #{limit => pos_integer()}.
+-type downloads_options() :: #{limit => pos_integer(), timeout_ms => pos_integer()}.
 -type format() :: csvgz | mmdb.
 %% The same set at runtime, because `format()' checks nothing once compiled.
 -define(FORMATS, [csvgz, mmdb]).
@@ -159,7 +159,8 @@ database_downloads(Client) ->
 %%
 %% Refusals are listed too: a denial is what answers "it stopped working", and
 %% its absence answers nothing. `limit' defaults to 50 and the API clamps it
-%% to 200.
+%% to 200. `timeout_ms' bounds each attempt of this call alone, so a retried
+%% call can take longer in total.
 -spec database_downloads(client(), downloads_options()) ->
     {ok, [map()]} | {error, internetdata_error:error()}.
 database_downloads(Client, Options) ->
@@ -167,7 +168,8 @@ database_downloads(Client, Options) ->
         {ok, Limit} -> [{<<"limit">>, integer_to_binary(Limit)}];
         error -> []
     end,
-    case unwrap(get_json(Client, <<"/api/v2/database/downloads">>, Query), <<"downloads">>) of
+    Path = <<"/api/v2/database/downloads">>,
+    case unwrap(get_json(bound(Client, Options), Path, Query), <<"downloads">>) of
         {ok, Downloads} -> {ok, internetdata_result:downloads(Downloads)};
         {error, Error} -> {error, Error}
     end.
@@ -280,6 +282,11 @@ message(Path, Reason) ->
 
 get_json(Client, Path, Query) ->
     internetdata_http:get_json(Client, Path, Query, maps:get(retries, Client)).
+
+%% The client with this call's `timeout_ms' in place of its own, which is the one
+%% the transport reads for every request it builds.
+bound(Client, Options) ->
+    Client#{timeout_ms := maps:get(timeout_ms, Options, maps:get(timeout_ms, Client))}.
 
 %% An unpublished format is refused here rather than sent, where it would cost a
 %% round trip and come back a 400 naming nothing the caller can act on.

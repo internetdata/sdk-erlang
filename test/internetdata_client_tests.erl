@@ -161,15 +161,26 @@ the_download_history_is_unwrapped_and_keeps_its_nulls_test() ->
     internetdata_stub:stop(Stub).
 
 %% Absent by default rather than sent as the API's own default, so the clamp and
-%% the default stay the server's to change.
+%% the default stay the server's to change. The limit asked for is the one on
+%% the wire.
 a_limit_is_only_sent_when_it_is_asked_for_test() ->
     Stub = internetdata_stub:start(#{?DOWNLOADS_PATH => #{body => #{<<"downloads">> => []}}}),
-    Client = client(Stub),
+    Http = internetdata_stub:http(Stub),
+    Parent = self(),
+    Recording = fun(#{url := Url} = Request) ->
+        Parent ! {requested, Url},
+        Http(Request)
+    end,
+    Client = internetdata:new(#{api_key => <<"k">>, http => Recording}),
 
+    {ok, []} = internetdata:database_downloads(Client, #{limit => 7}),
     {ok, []} = internetdata:database_downloads(Client),
-    {ok, []} = internetdata:database_downloads(Client, #{limit => 200}),
+    {ok, []} = internetdata:database_downloads(Client, #{timeout_ms => 5000}),
 
-    ?assertEqual(2, internetdata_stub:calls(Stub)),
+    ?assertEqual([{?DOWNLOADS_PATH, [{<<"limit">>, <<"7">>}]},
+                  {?DOWNLOADS_PATH, []},
+                  {?DOWNLOADS_PATH, []}],
+                 [path_and_query(Url) || Url <- requested([])]),
     internetdata_stub:stop(Stub).
 
 %% A dataset id is caller input. Percent-encoded, it cannot escape the parameter
@@ -284,24 +295,41 @@ spec_lines() ->
     {ok, Yaml} = file:read_file("spec/openapi.yaml"),
     binary:split(Yaml, <<"\n">>, [global]).
 
-%% The client's bound (1 s) fires on every JSON call, and the elapsed time says it
-%% was that bound rather than the stall ending on its own.
+%% A call's own bound (300 ms) fires first, then every call with no override waits
+%% for the client's (1 s), and the elapsed time says which one fired rather than
+%% the stall ending on its own.
 assert_body_bounded(Pace) ->
     Origin = internetdata_origin:start(#{body_pace => Pace}),
     Client = internetdata:new(#{base_url => internetdata_origin:base_url(Origin), api_key => <<"k">>,
                                 retries => 0, timeout_ms => 1000}),
     Calls = [
-        {database_list, fun() -> internetdata:database_list(Client) end},
-        {database_metadata, fun() -> internetdata:database_metadata(Client, <<"bogon_ip_v1">>) end},
-        {database_downloads, fun() -> internetdata:database_downloads(Client, #{limit => 5}) end}
+        {database_downloads_per_call, {250, 900}, fun() ->
+            internetdata:database_downloads(Client, #{limit => 5, timeout_ms => 300})
+        end},
+        {database_list, {900, 2500}, fun() -> internetdata:database_list(Client) end},
+        {database_metadata, {900, 2500}, fun() ->
+            internetdata:database_metadata(Client, <<"bogon_ip_v1">>)
+        end},
+        {database_downloads, {900, 2500}, fun() -> internetdata:database_downloads(Client, #{limit => 5}) end}
     ],
     [begin
          {Micros, Answer} = timer:tc(Call),
          ?assertMatch({Name, {error, #{kind := network, retryable := true}}}, {Name, Answer}),
          Ms = Micros div 1000,
-         ?assertEqual({Name, within}, {Name, within(Ms, {900, 2500})})
-     end || {Name, Call} <- Calls],
+         ?assertEqual({Name, within, Window}, {Name, within(Ms, Window), Window})
+     end || {Name, Window, Call} <- Calls],
     internetdata_origin:stop(Origin).
+
+requested(Acc) ->
+    receive
+        {requested, Url} -> requested([Url | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+path_and_query(Url) ->
+    Parsed = uri_string:parse(Url),
+    {maps:get(path, Parsed), uri_string:dissect_query(maps:get(query, Parsed, <<>>))}.
 
 within(Ms, {Low, High}) when Ms >= Low, Ms < High -> within;
 within(Ms, _Window) -> {took_ms, Ms}.
