@@ -12,8 +12,9 @@
 #
 #   1. Nothing published satisfies rebar.config's constraint. Before the first
 #      release there is no artifact to test.
-#   2. The staging key is missing. The suite skips from inside, so the skip and
-#      its reason land in the eunit output rather than in this script's preamble.
+#   2. The staging key is missing. The database tests skip from inside, so the
+#      skip and its reason land in the eunit output rather than in this script's
+#      preamble. The OAuth checks carry no key and run regardless.
 #
 # A THIRD condition is a failure rather than a skip: the dependency resolving
 # from anywhere but hex. A run against local source passes every test and says
@@ -99,7 +100,7 @@ function reportKey() {
     if [ -n "${INTERNETDATA_STAGING_KEY:-}" ] ; then
         echo "==> staging key present"
     else
-        notice "INTERNETDATA_STAGING_KEY is not set: every test that needs staging is skipped"
+        notice "INTERNETDATA_STAGING_KEY is not set: the database tests are skipped"
     fi
 }
 
