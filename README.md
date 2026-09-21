@@ -14,11 +14,11 @@ The library helps you browse the datasets your organization licenses and downloa
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.5"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.6"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
-Every endpoint published today is authenticated, so a client needs an API key. Create one in the [console](https://app.internetdata.io) with the `db.download` scope; keys are default-deny, so an existing key does not gain database access until that scope is added to it. `api_key` is nevertheless OPTIONAL: `internetdata:new()` builds a client that sends no `authorization` header at all, ready for a dataset served without a license.
+Every database endpoint published today is authenticated, so a client needs an API key for them. Create one in the [console](https://app.internetdata.io) with the `db.download` scope; keys are default-deny, so an existing key does not gain database access until that scope is added to it. `api_key` is nevertheless OPTIONAL: `internetdata:new()` builds a client that sends no `authorization` header at all, ready for a dataset served without a license.
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -130,11 +130,30 @@ Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are no
 Client = internetdata:new(#{api_key => <<"your-api-key">>, retries => 4, timeout_ms => 60000}).
 ```
 
-`timeout_ms` bounds the wait for a whole request, body included, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size. It bounds each attempt, so a call that is retried can take longer in total, and `database_downloads/2` takes a `timeout_ms` of its own for that call alone:
+`timeout_ms` bounds the wait for a whole request, body included, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size. It bounds each attempt, so a call that is retried can take longer in total, and `database_downloads/2` and every `oauth_*` function take a `timeout_ms` of their own for that call alone:
 
 ```erlang
 {ok, Attempts} = internetdata:database_downloads(Client, #{limit => 20, timeout_ms => 5000}).
 ```
+
+### Sign in with OAuth (device flow)
+
+A program running on a person's own machine can let them sign in with their browser and pick one of their API keys, instead of asking them to paste one.
+
+```erlang
+Client = internetdata:new(),
+ClientId = <<"your-client-id">>,
+{ok, Device} = internetdata:oauth_device_authorization(Client, ClientId,
+    #{scope => <<"account.read apikeys.read apikeys.reveal">>}),
+io:format("Open ~s and enter ~s~n", [maps:get(verification_uri, Device), maps:get(user_code, Device)]),
+{ok, Token} = internetdata:oauth_poll_device_token(Client, ClientId, Device),
+Keyed = case Token of
+    #{apikey := Key} -> internetdata:new(#{api_key => Key});
+    #{} -> error(no_api_key_picked)
+end.
+```
+
+A refusal answers `{error, #{error_code := <<"access_denied">>}}` and a code that expired first `{error, #{error_code := <<"expired_token">>}}`. Client IDs are issued on request from support@internetdata.io, and `internetdata:oauth_revoke(Client, ClientId, maps:get(refresh_token, Token))` signs the machine out.
 
 ## Other Libraries
 

@@ -88,6 +88,7 @@ serve(Socket, Counter, Options) ->
     case read_request(Socket) of
         {ok, Path, Query, Credentialed} ->
             Counter ! {started, Path, Credentialed},
+            timer:sleep(maps:get(delay_ms, Options, 0)),
             case {maps:find(body_pace, Options), Path} of
                 {{ok, Pace}, _} -> paced(Socket, Pace);
                 {error, <<"/flaky">>} -> flaky(Socket, Counter);

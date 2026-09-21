@@ -9,12 +9,6 @@
 %% BINARIES for anything the server names: the format keys under `schema',
 %% `sample' and `size', and the dataset column names inside a sample row. See
 %% {@link internetdata_result} for why.
-%%
-%% <b>The catalog is not the same for everyone.</b> A dataset commissioned for a
-%% single customer is simply ABSENT from {@link database_list/1} for anybody
-%% else, rather than listed with an `unlicensed' standing. Read the listing this
-%% client returns; do not cache one and reuse it under a different key, and do
-%% not assemble a catalog from anywhere else.
 -module(internetdata).
 
 -export([new/0, new/1]).
@@ -22,8 +16,13 @@
          database_downloads/1, database_downloads/2, database_download_url/3,
          database_download/4, database_download_bytes/3]).
 -export([database_formats/0, standings/0, license_types/0]).
+-export([oauth_metadata/1, oauth_metadata/2, oauth_device_authorization/2,
+         oauth_device_authorization/3, oauth_exchange_device_code/3, oauth_exchange_device_code/4,
+         oauth_exchange_refresh_token/3, oauth_exchange_refresh_token/4, oauth_revoke/3, oauth_revoke/4,
+         oauth_poll_device_token/3, oauth_poll_device_token/4]).
 
 -export_type([client/0, options/0, downloads_options/0, format/0]).
+-export_type([oauth_options/0, device_authorization_options/0]).
 
 -define(DEFAULT_BASE_URL, <<"https://internetdata.io">>).
 -define(DEFAULT_RETRIES, 2).
@@ -51,6 +50,11 @@
 %% The same set at runtime, because `format()' checks nothing once compiled.
 -define(FORMATS, [csvgz, mmdb]).
 
+-type oauth_options() :: #{timeout_ms => pos_integer()}.
+-type device_authorization_options() :: #{scope => binary() | string(),
+                                          resource => binary() | string(),
+                                          timeout_ms => pos_integer()}.
+
 %% @doc Build a client against production with no key.
 -spec new() -> client().
 new() ->
@@ -58,11 +62,12 @@ new() ->
 
 %% @doc Build a client.
 %%
-%% `api_key' is optional. Every endpoint published today is authenticated, so a
-%% client built without one answers 401 - but that is what the API serves rather
-%% than a property of its shape, and a client that could not be BUILT without a
-%% key would have to break its own signature the day a dataset is served free.
-%% Without one no `authorization' header is sent at all.
+%% `api_key' is optional. Every database endpoint published today is
+%% authenticated, so a client built without one answers 401 there - but that is
+%% what the API serves rather than a property of its shape, and a client that
+%% could not be BUILT without a key would have to break its own signature the day
+%% a dataset is served free. Without one no `authorization' header is sent at all,
+%% and the `oauth_*' functions never send one.
 %%
 %% Create a key in the console with the `db.download' scope. Keys are
 %% default-deny, so an existing key does not gain database access until that
@@ -105,8 +110,7 @@ license_types() ->
 %% The whole published catalog, not only what you license: `standing' says
 %% whether a family is yours today (`&lt;&lt;"licensed"&gt;&gt;'), was
 %% (`&lt;&lt;"expired"&gt;&gt;'), or has never been bought
-%% (`&lt;&lt;"unlicensed"&gt;&gt;'). Families built for one customer are not listed
-%% to anybody else at all, so what comes back depends on the key that asked.
+%% (`&lt;&lt;"unlicensed"&gt;&gt;').
 %%
 %% A license covers a family (`base'), while a download names one of its
 %% versions, so the ids the other calls take come from a family's `versions'
@@ -229,6 +233,105 @@ database_download_bytes(Client, Id, Format) ->
         {ok, #{acc := Chunks}} -> {ok, iolist_to_binary(lists:reverse(Chunks))};
         {error, Error} -> {error, Error}
     end.
+
+-spec oauth_metadata(client()) ->
+    {ok, internetdata_oauth:metadata()} | {error, internetdata_error:error()}.
+oauth_metadata(Client) ->
+    oauth_metadata(Client, #{}).
+
+%% @doc The authorization server's discovery document.
+%%
+%% Every `oauth_*' call sends NO credential, whatever the client was built with,
+%% and works the same on a client built without a key. `timeout_ms' in `Options'
+%% bounds each attempt of this call alone.
+-spec oauth_metadata(client(), oauth_options()) ->
+    {ok, internetdata_oauth:metadata()} | {error, internetdata_error:error()}.
+oauth_metadata(Client, Options) ->
+    internetdata_oauth:metadata(Client, Options).
+
+-spec oauth_device_authorization(client(), binary() | string()) ->
+    {ok, internetdata_oauth:device_authorization()} | {error, internetdata_error:error()}.
+oauth_device_authorization(Client, ClientId) ->
+    oauth_device_authorization(Client, ClientId, #{}).
+
+%% @doc Start a device sign-in: show the person `user_code' and
+%% `verification_uri', then call {@link oauth_poll_device_token/3}.
+%%
+%% Client IDs are issued on request from support@internetdata.io. `scope' is one
+%% space-delimited string, sent as given; the server grants what the client may
+%% ask for and silently drops the rest.
+-spec oauth_device_authorization(client(), binary() | string(), device_authorization_options()) ->
+    {ok, internetdata_oauth:device_authorization()} | {error, internetdata_error:error()}.
+oauth_device_authorization(Client, ClientId, Options) ->
+    Extra = [{atom_to_binary(Name), bin(Value)} || Name <- [scope, resource],
+                                                   {ok, Value} <- [maps:find(Name, Options)]],
+    internetdata_oauth:device_authorization(Client, bin(ClientId), Extra, Options).
+
+-spec oauth_exchange_device_code(client(), binary() | string(), binary() | string()) ->
+    {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
+oauth_exchange_device_code(Client, ClientId, DeviceCode) ->
+    oauth_exchange_device_code(Client, ClientId, DeviceCode, #{}).
+
+%% @doc Exchange a device code for tokens, once. Until the person approves, this
+%% answers `{error, #{error_code := <<"authorization_pending">>}}';
+%% {@link oauth_poll_device_token/3} is the loop that waits for them.
+%%
+%% Never retried: the server spends the code when it answers, so a retry after a
+%% lost success could only fail and lose the tokens. The answer carries
+%% `apikey_id' and `apikey' when the person picked a key.
+-spec oauth_exchange_device_code(client(), binary() | string(), binary() | string(), oauth_options()) ->
+    {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
+oauth_exchange_device_code(Client, ClientId, DeviceCode, Options) ->
+    internetdata_oauth:exchange_device_code(Client, bin(ClientId), bin(DeviceCode), Options).
+
+-spec oauth_exchange_refresh_token(client(), binary() | string(), binary() | string()) ->
+    {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
+oauth_exchange_refresh_token(Client, ClientId, RefreshToken) ->
+    oauth_exchange_refresh_token(Client, ClientId, RefreshToken, #{}).
+
+%% @doc Exchange a refresh token for a new pair. The token presented is spent, so
+%% keep the `refresh_token' this answers. Never retried; the answer may name the
+%% key in `apikey_id' but never carries `apikey'.
+-spec oauth_exchange_refresh_token(client(), binary() | string(), binary() | string(),
+                                   oauth_options()) ->
+    {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
+oauth_exchange_refresh_token(Client, ClientId, RefreshToken, Options) ->
+    internetdata_oauth:exchange_refresh_token(Client, bin(ClientId), bin(RefreshToken), Options).
+
+-spec oauth_revoke(client(), binary() | string(), binary() | string()) ->
+    ok | {error, internetdata_error:error()}.
+oauth_revoke(Client, ClientId, Token) ->
+    oauth_revoke(Client, ClientId, Token, #{}).
+
+%% @doc Revoke an access or a refresh token. A refresh token ends the whole grant
+%% and every token it issued, which is how a machine signs out.
+-spec oauth_revoke(client(), binary() | string(), binary() | string(), oauth_options()) ->
+    ok | {error, internetdata_error:error()}.
+oauth_revoke(Client, ClientId, Token, Options) ->
+    internetdata_oauth:revoke(Client, bin(ClientId), bin(Token), Options).
+
+-spec oauth_poll_device_token(client(), binary() | string(), internetdata_oauth:device_authorization()) ->
+    {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
+oauth_poll_device_token(Client, ClientId, Device) ->
+    oauth_poll_device_token(Client, ClientId, Device, #{}).
+
+%% @doc Wait for the person to approve a device sign-in, and answer its tokens.
+%%
+%% Waits the device's `interval' seconds before EVERY exchange, the first
+%% included, and five seconds longer for good each time the server answers
+%% `slow_down'. A refusal answers `error_code' `<<"access_denied">>'; an expired
+%% code `<<"expired_token">>', with no `status' when the device's `expires_in'
+%% ran out here first. Any other failure, a timeout or an outage included, ends
+%% the wait unchanged; calling again with the same device is safe until it expires.
+%%
+%% It blocks the calling process until one of those outcomes. There is no
+%% cancellation handle, so run it in a process you can kill. `timeout_ms' bounds
+%% each exchange, never the whole wait.
+-spec oauth_poll_device_token(client(), binary() | string(), internetdata_oauth:device_authorization(),
+                              oauth_options()) ->
+    {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
+oauth_poll_device_token(Client, ClientId, Device, Options) ->
+    internetdata_oauth:poll_device_token(Client, bin(ClientId), Device, Options).
 
 to_file(Client, Id, Format, Dest, Partial, Fd) ->
     Sink = #{acc => Fd, fold => fun(Chunk, Handle) ->

@@ -306,11 +306,15 @@ assert_body_bounded(Pace) ->
         {database_downloads_per_call, {250, 900}, fun() ->
             internetdata:database_downloads(Client, #{limit => 5, timeout_ms => 300})
         end},
+        {oauth_exchange, {250, 900}, fun() ->
+            internetdata:oauth_exchange_device_code(Client, <<"cli">>, <<"mo_dc_x">>, #{timeout_ms => 300})
+        end},
         {database_list, {900, 2500}, fun() -> internetdata:database_list(Client) end},
         {database_metadata, {900, 2500}, fun() ->
             internetdata:database_metadata(Client, <<"bogon_ip_v1">>)
         end},
-        {database_downloads, {900, 2500}, fun() -> internetdata:database_downloads(Client, #{limit => 5}) end}
+        {database_downloads, {900, 2500}, fun() -> internetdata:database_downloads(Client, #{limit => 5}) end},
+        {oauth_metadata, {900, 2500}, fun() -> internetdata:oauth_metadata(Client) end}
     ],
     [begin
          {Micros, Answer} = timer:tc(Call),
