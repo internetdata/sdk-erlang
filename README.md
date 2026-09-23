@@ -136,6 +136,8 @@ Client = internetdata:new(#{api_key => <<"your-api-key">>, retries => 4, timeout
 {ok, Attempts} = internetdata:database_downloads(Client, #{limit => 20, timeout_ms => 5000}).
 ```
 
+`timeout_ms` is milliseconds from 1 to 4294967295 (about 49.7 days), or `infinity` for no bound. Anything else is refused where it is set: `new/1` raises `badarg`, and a call answers `bad_request` before sending anything.
+
 ### Sign in with OAuth (device flow)
 
 A program running on a person's own machine can let them sign in with their browser and pick one of their API keys, instead of asking them to paste one.

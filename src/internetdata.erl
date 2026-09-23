@@ -27,12 +27,15 @@
 -define(DEFAULT_BASE_URL, <<"https://internetdata.io">>).
 -define(DEFAULT_RETRIES, 2).
 -define(DEFAULT_TIMEOUT_MS, 30000).
+%% The longest `timeout_ms' the transport can wait on: httpc's timer and a
+%% `receive ... after' both raise `timeout_value' past 2^32 - 1 ms (~49.7 days).
+-define(MAX_TIMEOUT_MS, 4294967295).
 
 -opaque client() :: #{
     base_url := binary(),
     api_key := binary() | undefined,
     retries := non_neg_integer(),
-    timeout_ms := pos_integer(),
+    timeout_ms := pos_integer() | infinity,
     user_agent := binary(),
     http := internetdata_http:http_fun()
 }.
@@ -41,19 +44,19 @@
     api_key => binary() | string(),
     base_url => binary() | string(),
     retries => non_neg_integer(),
-    timeout_ms => pos_integer(),
+    timeout_ms => pos_integer() | infinity,
     http => internetdata_http:http_fun()
 }.
 
--type downloads_options() :: #{limit => pos_integer(), timeout_ms => pos_integer()}.
+-type downloads_options() :: #{limit => pos_integer(), timeout_ms => pos_integer() | infinity}.
 -type format() :: csvgz | mmdb.
 %% The same set at runtime, because `format()' checks nothing once compiled.
 -define(FORMATS, [csvgz, mmdb]).
 
--type oauth_options() :: #{timeout_ms => pos_integer()}.
+-type oauth_options() :: #{timeout_ms => pos_integer() | infinity}.
 -type device_authorization_options() :: #{scope => binary() | string(),
                                           resource => binary() | string(),
-                                          timeout_ms => pos_integer()}.
+                                          timeout_ms => pos_integer() | infinity}.
 
 %% @doc Build a client against production with no key.
 -spec new() -> client().
@@ -72,17 +75,25 @@ new() ->
 %% Create a key in the console with the `db.download' scope. Keys are
 %% default-deny, so an existing key does not gain database access until that
 %% scope is added to it.
+%%
+%% `timeout_ms' is milliseconds from 1 to 4294967295, or `infinity' for no bound,
+%% and anything else raises `badarg' here rather than failing every call.
 -spec new(options()) -> client().
 new(Options) ->
+    TimeoutMs = maps:get(timeout_ms, Options, ?DEFAULT_TIMEOUT_MS),
+    case valid_timeout(TimeoutMs) of
+        true -> ok;
+        false -> erlang:error({badarg, {timeout_ms, TimeoutMs}})
+    end,
     case maps:is_key(http, Options) of
         false -> internetdata_http:ensure_ready();
         true -> ok
     end,
     #{
-        base_url => bin(maps:get(base_url, Options, ?DEFAULT_BASE_URL)),
+        base_url => trim_slashes(bin(maps:get(base_url, Options, ?DEFAULT_BASE_URL))),
         api_key => api_key(Options),
         retries => maps:get(retries, Options, ?DEFAULT_RETRIES),
-        timeout_ms => maps:get(timeout_ms, Options, ?DEFAULT_TIMEOUT_MS),
+        timeout_ms => TimeoutMs,
         user_agent => user_agent(),
         http => maps:get(http, Options, internetdata_http:httpc_fun())
     }.
@@ -173,9 +184,14 @@ database_downloads(Client, Options) ->
         error -> []
     end,
     Path = <<"/api/v2/database/downloads">>,
-    case unwrap(get_json(bound(Client, Options), Path, Query), <<"downloads">>) of
-        {ok, Downloads} -> {ok, internetdata_result:downloads(Downloads)};
-        {error, Error} -> {error, Error}
+    case check_timeout(Options) of
+        ok ->
+            case unwrap(get_json(bound(Client, Options), Path, Query), <<"downloads">>) of
+                {ok, Downloads} -> {ok, internetdata_result:downloads(Downloads)};
+                {error, Error} -> {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 %% @doc The time-limited URL for one dataset file.
@@ -247,7 +263,10 @@ oauth_metadata(Client) ->
 -spec oauth_metadata(client(), oauth_options()) ->
     {ok, internetdata_oauth:metadata()} | {error, internetdata_error:error()}.
 oauth_metadata(Client, Options) ->
-    internetdata_oauth:metadata(Client, Options).
+    case check_timeout(Options) of
+        ok -> internetdata_oauth:metadata(Client, Options);
+        {error, Error} -> {error, Error}
+    end.
 
 -spec oauth_device_authorization(client(), binary() | string()) ->
     {ok, internetdata_oauth:device_authorization()} | {error, internetdata_error:error()}.
@@ -265,7 +284,10 @@ oauth_device_authorization(Client, ClientId) ->
 oauth_device_authorization(Client, ClientId, Options) ->
     Extra = [{atom_to_binary(Name), bin(Value)} || Name <- [scope, resource],
                                                    {ok, Value} <- [maps:find(Name, Options)]],
-    internetdata_oauth:device_authorization(Client, bin(ClientId), Extra, Options).
+    case check_timeout(Options) of
+        ok -> internetdata_oauth:device_authorization(Client, bin(ClientId), Extra, Options);
+        {error, Error} -> {error, Error}
+    end.
 
 -spec oauth_exchange_device_code(client(), binary() | string(), binary() | string()) ->
     {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
@@ -282,7 +304,10 @@ oauth_exchange_device_code(Client, ClientId, DeviceCode) ->
 -spec oauth_exchange_device_code(client(), binary() | string(), binary() | string(), oauth_options()) ->
     {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
 oauth_exchange_device_code(Client, ClientId, DeviceCode, Options) ->
-    internetdata_oauth:exchange_device_code(Client, bin(ClientId), bin(DeviceCode), Options).
+    case check_timeout(Options) of
+        ok -> internetdata_oauth:exchange_device_code(Client, bin(ClientId), bin(DeviceCode), Options);
+        {error, Error} -> {error, Error}
+    end.
 
 -spec oauth_exchange_refresh_token(client(), binary() | string(), binary() | string()) ->
     {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
@@ -296,7 +321,10 @@ oauth_exchange_refresh_token(Client, ClientId, RefreshToken) ->
                                    oauth_options()) ->
     {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
 oauth_exchange_refresh_token(Client, ClientId, RefreshToken, Options) ->
-    internetdata_oauth:exchange_refresh_token(Client, bin(ClientId), bin(RefreshToken), Options).
+    case check_timeout(Options) of
+        ok -> internetdata_oauth:exchange_refresh_token(Client, bin(ClientId), bin(RefreshToken), Options);
+        {error, Error} -> {error, Error}
+    end.
 
 -spec oauth_revoke(client(), binary() | string(), binary() | string()) ->
     ok | {error, internetdata_error:error()}.
@@ -308,7 +336,10 @@ oauth_revoke(Client, ClientId, Token) ->
 -spec oauth_revoke(client(), binary() | string(), binary() | string(), oauth_options()) ->
     ok | {error, internetdata_error:error()}.
 oauth_revoke(Client, ClientId, Token, Options) ->
-    internetdata_oauth:revoke(Client, bin(ClientId), bin(Token), Options).
+    case check_timeout(Options) of
+        ok -> internetdata_oauth:revoke(Client, bin(ClientId), bin(Token), Options);
+        {error, Error} -> {error, Error}
+    end.
 
 -spec oauth_poll_device_token(client(), binary() | string(), internetdata_oauth:device_authorization()) ->
     {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
@@ -331,7 +362,10 @@ oauth_poll_device_token(Client, ClientId, Device) ->
                               oauth_options()) ->
     {ok, internetdata_oauth:token_response()} | {error, internetdata_error:error()}.
 oauth_poll_device_token(Client, ClientId, Device, Options) ->
-    internetdata_oauth:poll_device_token(Client, bin(ClientId), Device, Options).
+    case check_timeout(Options) of
+        ok -> internetdata_oauth:poll_device_token(Client, bin(ClientId), Device, Options);
+        {error, Error} -> {error, Error}
+    end.
 
 to_file(Client, Id, Format, Dest, Partial, Fd) ->
     Sink = #{acc => Fd, fold => fun(Chunk, Handle) ->
@@ -391,6 +425,23 @@ get_json(Client, Path, Query) ->
 bound(Client, Options) ->
     Client#{timeout_ms := maps:get(timeout_ms, Options, maps:get(timeout_ms, Client))}.
 
+%% Refused here rather than sent: httpc fails a call at once on zero, runs it with
+%% no bound on a value it ignores, and raises in the caller past ?MAX_TIMEOUT_MS.
+check_timeout(#{timeout_ms := TimeoutMs}) ->
+    case valid_timeout(TimeoutMs) of
+        true ->
+            ok;
+        false ->
+            Message = io_lib:format("timeout_ms must be infinity or an integer from 1 to ~b, not ~p",
+                                    [?MAX_TIMEOUT_MS, TimeoutMs]),
+            {error, #{kind => bad_request, retryable => false, message => iolist_to_binary(Message)}}
+    end;
+check_timeout(_Options) ->
+    ok.
+
+valid_timeout(infinity) -> true;
+valid_timeout(Ms) -> is_integer(Ms) andalso Ms >= 1 andalso Ms =< ?MAX_TIMEOUT_MS.
+
 %% An unpublished format is refused here rather than sent, where it would cost a
 %% round trip and come back a 400 naming nothing the caller can act on.
 format_name(Format) ->
@@ -424,6 +475,16 @@ api_key(Options) ->
                 <<>> -> undefined;
                 Bin -> Bin
             end
+    end.
+
+%% Every one, not only the last: each path appended starts with its own `/', and
+%% `//api/...' is another path, one the API answers with a redirect.
+trim_slashes(<<>>) ->
+    <<>>;
+trim_slashes(Url) ->
+    case binary:last(Url) of
+        $/ -> trim_slashes(binary:part(Url, 0, byte_size(Url) - 1));
+        _ -> Url
     end.
 
 user_agent() ->

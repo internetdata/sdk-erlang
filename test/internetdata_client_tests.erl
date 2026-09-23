@@ -9,6 +9,7 @@
 -define(CHECKSUM_PATH, <<"/api/v2/database/checksum">>).
 -define(DOWNLOADS_PATH, <<"/api/v2/database/downloads">>).
 -define(DOWNLOAD_PATH, <<"/api/v2/database/download">>).
+-define(INVALID_TIMEOUTS, [0, -1, 1.5, foo, 4294967296, 1 bsl 64]).
 
 %% Today every endpoint is authenticated, so a keyless client only ever gets a
 %% 401. It still has to BUILD and to send no credential at all: an empty key is
@@ -29,6 +30,14 @@ a_keyless_client_sends_no_authorization_header_test() ->
 %% `new/0' is production with no key, which is the whole of the keyless surface.
 new_with_no_options_at_all_builds_test() ->
     ?assertMatch(#{api_key := undefined}, internetdata:new()).
+
+%% httpc fails every call at once on zero, runs one with no bound on a value it
+%% ignores, and raises past 2^32 - 1 ms, so none of them may build a client.
+a_timeout_out_of_range_is_refused_by_new_test() ->
+    [?assertError({badarg, {timeout_ms, V}}, internetdata:new(#{timeout_ms => V}))
+     || V <- ?INVALID_TIMEOUTS],
+    [?assertMatch(#{timeout_ms := V}, internetdata:new(#{timeout_ms => V}))
+     || V <- [1, 4294967295, infinity]].
 
 %% Deleting the auth header, or sending it under the wrong scheme, passed a whole
 %% suite in another language until something mutated it.
@@ -51,6 +60,34 @@ the_base_url_option_decides_where_requests_go_test() ->
     {ok, []} = internetdata:database_list(Client),
 
     ?assertEqual(1, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+%% Every path appended starts with `/', so a slash left on the base URL doubles
+%% into `//api/...', which is another path, and a second or third doubles too.
+a_trailing_slash_on_the_base_url_never_doubles_into_the_path_test_() ->
+    [{"base_url ending " ++ lists:duplicate(N, $/), fun() -> assert_slashes_dropped(N) end}
+     || N <- [1, 2, 3]].
+
+assert_slashes_dropped(N) ->
+    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => []}}}),
+    Http = internetdata_stub:http(Stub),
+    Parent = self(),
+    Recording = fun(#{url := Url} = Request) ->
+        Parent ! {requested, Url},
+        Http(Request)
+    end,
+    Base = <<"https://h.example">>,
+    Client = internetdata:new(#{base_url => <<Base/binary, (binary:copy(<<"/">>, N))/binary>>,
+                                http => Recording}),
+
+    _ = internetdata:database_list(Client),
+    _ = internetdata:oauth_metadata(Client),
+    _ = internetdata:oauth_device_authorization(Client, <<"cli">>),
+
+    ?assertEqual([<<Base/binary, "/api/v2/database/list">>,
+                  <<Base/binary, "/.well-known/oauth-authorization-server">>,
+                  <<Base/binary, "/oauth/device_authorization">>],
+                 requested([])),
     internetdata_stub:stop(Stub).
 
 %% One level down, under `databases'. Reading the top level answers a
@@ -183,6 +220,18 @@ a_limit_is_only_sent_when_it_is_asked_for_test() ->
                  [path_and_query(Url) || Url <- requested([])]),
     internetdata_stub:stop(Stub).
 
+%% A per-call bound httpc cannot wait on is refused as well, before it costs a
+%% request.
+a_per_call_timeout_out_of_range_is_refused_before_any_request_test() ->
+    Stub = internetdata_stub:start(#{?DOWNLOADS_PATH => #{body => #{<<"downloads">> => []}}}),
+    Client = client(Stub),
+
+    [?assertMatch({V, {error, #{kind := bad_request, retryable := false}}},
+                  {V, internetdata:database_downloads(Client, #{timeout_ms => V})})
+     || V <- ?INVALID_TIMEOUTS],
+    ?assertEqual(0, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
 %% A dataset id is caller input. Percent-encoded, it cannot escape the parameter
 %% it was put in; unencoded, `x&id=y' would ask for a different dataset entirely.
 a_dataset_id_cannot_rewrite_the_request_test() ->
@@ -209,6 +258,36 @@ a_server_fault_is_retried_and_a_missing_dataset_is_not_test() ->
                  internetdata:database_metadata(MissingClient, <<"nope_v1">>)),
     ?assertEqual(1, internetdata_stub:calls(Missing)),
     internetdata_stub:stop(Missing).
+
+%% Waited out as given, each of these would hold the call for weeks or for ever;
+%% past ~24.8 days the client's own backoff is used instead, still a throttle.
+a_retry_after_past_the_bound_is_waited_out_on_the_backoff_test_() ->
+    [{binary_to_list(RetryAfter), fun() -> assert_backoff_used(RetryAfter) end}
+     || RetryAfter <- [<<"2147484">>, <<"9223372036854775807">>, <<"Fri, 31 Dec 9999 23:59:59 GMT">>]].
+
+%% The first answer throttles and the second serves. The call runs in a process
+%% killed after 3 s, so a wait as long as the header fails rather than hangs.
+assert_backoff_used(RetryAfter) ->
+    Served = counters:new(1, []),
+    Http = fun(_Request) ->
+        counters:add(Served, 1, 1),
+        case counters:get(Served, 1) of
+            1 -> {ok, #{status => 429, headers => [{<<"retry-after">>, RetryAfter}], body => <<>>}};
+            _ -> {ok, #{status => 200, headers => [], body => <<"{\"databases\":[]}">>}}
+        end
+    end,
+    Client = internetdata:new(#{api_key => <<"k">>, retries => 1, http => Http}),
+    Parent = self(),
+    Caller = spawn(fun() -> Parent ! {self(), internetdata:database_list(Client)} end),
+
+    Answer = receive
+        {Caller, Result} -> Result
+    after 3000 ->
+        exit(Caller, kill),
+        still_waiting_after_3s
+    end,
+
+    ?assertEqual({{ok, []}, 2}, {Answer, counters:get(Served, 1)}).
 
 a_body_that_is_not_json_is_not_a_crash_test() ->
     Stub = internetdata_stub:start(#{?LIST_PATH => #{raw => <<"<html>nope</html>">>}}),

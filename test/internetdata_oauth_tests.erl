@@ -12,6 +12,7 @@
 -define(CLIENT_ID, <<"internetdata-cli">>).
 -define(BOUND_MS, 15000).
 -define(WAIT_CAP, 30).
+-define(INVALID_TIMEOUTS, [0, -1, 1.5, foo, 4294967296, 1 bsl 64]).
 
 each_operation_requests_its_own_method_and_path_test_() ->
     {timeout, 60, fun() ->
@@ -253,6 +254,31 @@ every_oauth_function_takes_a_per_call_timeout_test_() ->
              ?assert(Micros < 2000000)
          end || {Name, Call} <- Calls],
         internetdata_origin:stop(Origin)
+    end}.
+
+%% httpc would fail the exchange at once, run it unbounded, or raise, so each is
+%% refused as `bad_request' before any request and, by the poll, before a wait.
+a_per_call_timeout_out_of_range_is_refused_before_any_request_or_wait_test_() ->
+    {timeout, 60, fun() ->
+        {Origin, Client} = keyless([]),
+        {Clock, Fake} = fake_clock(),
+        [#{<<"device">> := Device} | _] = cases(<<"poll">>),
+        Calls = [
+            {metadata, fun(Options) -> internetdata:oauth_metadata(Client, Options) end},
+            {revoke, fun(Options) ->
+                internetdata:oauth_revoke(Client, ?CLIENT_ID, <<"mo_rt_x">>, Options)
+            end},
+            {poll_device_token, fun(Options) ->
+                Polled = Options#{clock => Fake},
+                internetdata:oauth_poll_device_token(Client, ?CLIENT_ID, device(Device), Polled)
+            end}
+        ],
+        [?assertMatch({Name, V, {error, #{kind := bad_request, retryable := false}}},
+                      {Name, V, bounded(fun() -> Call(#{timeout_ms => V}) end)})
+         || {Name, Call} <- Calls, V <- ?INVALID_TIMEOUTS],
+        ?assertEqual([], internetdata_oauth_origin:requests(Origin)),
+        ?assertEqual([], waits(Clock)),
+        internetdata_oauth_origin:stop(Origin)
     end}.
 
 call(Client, <<"metadata">>, _Args) ->
