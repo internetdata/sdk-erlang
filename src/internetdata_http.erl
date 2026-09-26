@@ -305,7 +305,7 @@ attempt(#{http := Http} = Client, Request, Retries, Handle, Attempt) ->
 
 %% A server-supplied Retry-After outranks our own schedule, since it is the only
 %% party that knows when the limit lifts; one longer than ~24.8 days
-%% (`int.MaxValue' ms, the bound .NET uses and perl takes, UMAN-4485) is waited
+%% (`int.MaxValue' ms, the bound .NET uses and perl takes) is waited
 %% out on the schedule instead, still `rate_limited', because `timer:sleep' would
 %% otherwise hold the call for as long as the header says, `9223372036854775807' s
 %% included.
