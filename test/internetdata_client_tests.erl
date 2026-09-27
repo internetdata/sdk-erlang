@@ -181,7 +181,7 @@ checksums_are_unwrapped_past_their_envelope_test() ->
 
 the_download_history_is_unwrapped_and_keeps_its_nulls_test() ->
     Attempt = #{<<"dataset_id">> => <<"bogon_ip_v1">>, <<"format">> => <<"csvgz">>,
-                <<"outcome">> => <<"denied">>, <<"bytes">> => null,
+                <<"outcome">> => <<"denied">>, <<"sample">> => true, <<"bytes">> => null,
                 <<"http_status">> => 403, <<"apikey_id">> => null,
                 <<"client_ip">> => <<"203.0.113.7">>, <<"user_agent">> => null,
                 <<"created">> => <<"2026-09-04T10:00:00.000Z">>},
@@ -191,6 +191,7 @@ the_download_history_is_unwrapped_and_keeps_its_nulls_test() ->
     {ok, [Download]} = internetdata:database_downloads(Client),
 
     ?assertEqual(<<"denied">>, maps:get(outcome, Download)),
+    ?assertEqual(true, maps:get(sample, Download)),
     %% A refusal moved no bytes and resolved no key. Turning either null into a
     %% zero or an empty string would invent an answer.
     ?assertEqual(null, maps:get(bytes, Download)),
