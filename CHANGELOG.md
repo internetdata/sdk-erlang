@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.8.0 - 2026-09-30
+
+### Features
+
+- Add the authorization code sign-in, with PKCE ([`9383997`](https://github.com/internetdata/sdk-erlang/commit/9383997a59d81cb0c76d080eb6e2091be000541b))
+
 ## 1.7.0 - 2026-09-27
 
 ### Features
