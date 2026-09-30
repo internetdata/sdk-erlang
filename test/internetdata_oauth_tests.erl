@@ -37,7 +37,8 @@ each_operation_requests_its_own_method_and_path_test_() ->
 
 every_form_leaves_encoded_exactly_as_the_corpus_says_test_() ->
     {timeout, 60, fun() ->
-        #{<<"contentType">> := Type, <<"cases">> := Cases} = oauth(<<"forms">>),
+        #{<<"contentType">> := Type, <<"cases">> := Main} = oauth(<<"forms">>),
+        Cases = Main ++ maps:get(<<"forms">>, oauth(<<"deferred">>)),
         [begin
              {Origin, Client} = keyless([success_for(Endpoint)]),
              ?assertMatch({Name, {ok, _}}, {Name, bounded(fun() -> call(Client, Operation, Args) end)}),
@@ -113,7 +114,8 @@ only_the_idempotent_operations_retry_test_() ->
              assert_outcome(Name, Expect, Outcome),
              internetdata_oauth_origin:stop(Origin)
          end || #{<<"name">> := Name, <<"operation">> := Operation, <<"args">> := Args,
-                  <<"responses">> := Responses, <<"expect">> := Expect} <- cases(<<"retries">>)]
+                  <<"responses">> := Responses, <<"expect">> := Expect}
+                <- cases(<<"retries">>) ++ maps:get(<<"retries">>, oauth(<<"deferred">>))]
     end}.
 
 poll_device_token_follows_every_corpus_case_test_() ->
@@ -140,7 +142,7 @@ no_oauth_request_carries_the_api_key_test_() ->
             oauth(<<"noCredential">>),
         Token = success_for(<<"token">>),
         Script = [success_for(<<"metadata">>), success_for(<<"deviceAuthorization">>), Token, Token,
-                  success_for(<<"revoke">>), Token],
+                  success_for(<<"revoke">>), Token, Token],
         Origin = internetdata_oauth_origin:start(Script),
         Client = internetdata:new(#{api_key => Key, base_url => internetdata_oauth_origin:base_url(Origin),
                                     timeout_ms => 2000}),
@@ -153,12 +155,19 @@ no_oauth_request_carries_the_api_key_test_() ->
             {ok, _} = internetdata:oauth_exchange_device_code(Client, ?CLIENT_ID, <<"mo_dc_x">>),
             {ok, _} = internetdata:oauth_exchange_refresh_token(Client, ?CLIENT_ID, <<"mo_rt_x">>),
             ok = internetdata:oauth_revoke(Client, ?CLIENT_ID, <<"mo_rt_x">>),
-            internetdata:oauth_poll_device_token(Client, ?CLIENT_ID, Device, #{clock => Fake})
+            {ok, _} = internetdata:oauth_poll_device_token(Client, ?CLIENT_ID, Device, #{clock => Fake}),
+            internetdata:oauth_exchange_authorization_code(Client, ?CLIENT_ID, <<"mo_ac_x">>, <<"v">>,
+                                                           <<"http://127.0.0.1:8765/cb">>)
         end),
 
         ?assertMatch({ok, _}, Outcome),
+        {ok, Url} = internetdata:oauth_authorization_url(Client, ?CLIENT_ID, <<"http://127.0.0.1:8765/cb">>,
+                                                         <<"c">>, #{scope => <<"apikeys.use">>, state => <<"s">>}),
+        ?assertEqual(nomatch, binary:match(Url, Key)),
+        #{query := UrlQuery} = uri_string:parse(Url),
+        [?assertNot(lists:keymember(Name, 1, uri_string:dissect_query(UrlQuery))) || Name <- ForbiddenQuery],
         Seen = internetdata_oauth_origin:requests(Origin),
-        ?assertEqual(6, length(Seen)),
+        ?assertEqual(7, length(Seen)),
         [begin
              [?assertEqual({Path, Name, absent}, {Path, Name, proplists:get_value(Name, Headers, absent)})
               || Name <- Forbidden],
@@ -243,6 +252,10 @@ every_oauth_function_takes_a_per_call_timeout_test_() ->
             {exchange_refresh_token,
              fun() -> internetdata:oauth_exchange_refresh_token(Client, ?CLIENT_ID, <<"mo_rt">>, PerCall) end},
             {revoke, fun() -> internetdata:oauth_revoke(Client, ?CLIENT_ID, <<"mo_rt_x">>, PerCall) end},
+            {exchange_authorization_code, fun() ->
+                internetdata:oauth_exchange_authorization_code(Client, ?CLIENT_ID, <<"mo_ac">>, <<"v">>,
+                                                               <<"http://r">>, PerCall)
+            end},
             {poll_device_token, fun() ->
                 Options = PerCall#{clock => Fake},
                 internetdata:oauth_poll_device_token(Client, ?CLIENT_ID, device(Device), Options)
@@ -268,6 +281,10 @@ a_per_call_timeout_out_of_range_is_refused_before_any_request_or_wait_test_() ->
             {revoke, fun(Options) ->
                 internetdata:oauth_revoke(Client, ?CLIENT_ID, <<"mo_rt_x">>, Options)
             end},
+            {exchange_authorization_code, fun(Options) ->
+                internetdata:oauth_exchange_authorization_code(Client, ?CLIENT_ID, <<"mo_ac_x">>, <<"v">>,
+                                                               <<"http://r">>, Options)
+            end},
             {poll_device_token, fun(Options) ->
                 Polled = Options#{clock => Fake},
                 internetdata:oauth_poll_device_token(Client, ?CLIENT_ID, device(Device), Polled)
@@ -281,6 +298,54 @@ a_per_call_timeout_out_of_range_is_refused_before_any_request_or_wait_test_() ->
         internetdata_oauth_origin:stop(Origin)
     end}.
 
+%% RFC 7636's vector, then generated pairs: 43 characters of base64url, each its
+%% own challenge, never the same verifier twice.
+a_pkce_pair_matches_the_rfc_vector_and_is_never_reused_test() ->
+    #{<<"verifier">> := Verifier, <<"challenge">> := Challenge, <<"method">> := Method,
+      <<"generatedVerifierPattern">> := Pattern} = maps:get(<<"pkce">>, oauth(<<"deferred">>)),
+    ?assertEqual(Challenge, internetdata:oauth_pkce_challenge(Verifier)),
+    ?assertEqual(Challenge, internetdata:oauth_pkce_challenge(binary_to_list(Verifier))),
+    Pairs = [internetdata:oauth_create_pkce() || _ <- [1, 2]],
+    [begin
+         ?assertMatch({match, _}, re:run(V, Pattern)),
+         ?assertEqual(internetdata:oauth_pkce_challenge(V), C),
+         ?assertEqual(Method, M),
+         ?assertEqual([challenge, method, verifier], lists:sort(maps:keys(Pair)))
+     end || #{verifier := V, challenge := C, method := M} = Pair <- Pairs],
+    [#{verifier := First}, #{verifier := Second}] = Pairs,
+    ?assertNotEqual(First, Second).
+
+the_authorization_url_is_built_exactly_and_sends_nothing_test_() ->
+    {timeout, 30, fun() ->
+        [begin
+             Client = internetdata:new(#{base_url => Base}),
+             Options = maps:from_list([{Key, V} || {Name, Key} <- [{<<"scope">>, scope}, {<<"state">>, state},
+                                                                   {<<"resource">>, resource}],
+                                                   {ok, V} <- [maps:find(Name, Case)]]),
+             ?assertEqual({Name0, {ok, Expect}},
+                          {Name0, internetdata:oauth_authorization_url(Client, ClientId, Redirect, Challenge,
+                                                                       Options)})
+         end || #{<<"name">> := Name0, <<"baseUrl">> := Base, <<"clientId">> := ClientId,
+                  <<"redirectUri">> := Redirect, <<"codeChallenge">> := Challenge,
+                  <<"expect">> := Expect} = Case <- maps:get(<<"authorizationUrl">>, oauth(<<"deferred">>))],
+        {Origin, Keyless} = keyless([]),
+        {ok, _} = internetdata:oauth_authorization_url(Keyless, "c", "http://127.0.0.1:8765/cb", "x"),
+        ?assertEqual([], internetdata_oauth_origin:requests(Origin)),
+        internetdata_oauth_origin:stop(Origin)
+    end}.
+
+an_empty_option_is_left_out_and_an_empty_or_unencodable_value_refused_test() ->
+    Client = internetdata:new(#{base_url => <<"https://internetdata.io">>}),
+    Url = fun(Id, Redirect, Challenge, Options) ->
+        internetdata:oauth_authorization_url(Client, Id, Redirect, Challenge, Options)
+    end,
+    ?assertEqual(Url(<<"c">>, <<"r">>, <<"x">>, #{}),
+                 Url(<<"c">>, <<"r">>, <<"x">>, #{scope => <<>>, state => "", resource => <<>>})),
+    [?assertMatch({error, #{kind := bad_request, retryable := false}}, Url(Id, R, X, #{}))
+     || {Id, R, X} <- [{<<>>, <<"r">>, <<"x">>}, {<<"c">>, "", <<"x">>}, {<<"c">>, <<"r">>, <<>>}]],
+    [?assertMatch({error, #{kind := bad_request}}, Url(<<"c">>, <<"r">>, <<"x">>, #{state => Bad}))
+     || Bad <- [<<16#ff>>, [16#D800], [foo]]].
+
 call(Client, <<"metadata">>, _Args) ->
     internetdata:oauth_metadata(Client);
 call(Client, <<"deviceAuthorization">>, #{<<"clientId">> := ClientId} = Args) ->
@@ -292,6 +357,9 @@ call(Client, <<"exchangeDeviceCode">>, #{<<"clientId">> := ClientId, <<"deviceCo
     internetdata:oauth_exchange_device_code(Client, ClientId, Code);
 call(Client, <<"exchangeRefreshToken">>, #{<<"clientId">> := ClientId, <<"refreshToken">> := Token}) ->
     internetdata:oauth_exchange_refresh_token(Client, ClientId, Token);
+call(Client, <<"exchangeAuthorizationCode">>, #{<<"clientId">> := ClientId, <<"code">> := Code,
+                                                <<"codeVerifier">> := Verifier, <<"redirectUri">> := Uri}) ->
+    internetdata:oauth_exchange_authorization_code(Client, ClientId, Code, Verifier, Uri);
 call(Client, <<"revoke">>, #{<<"clientId">> := ClientId, <<"token">> := Token}) ->
     case internetdata:oauth_revoke(Client, ClientId, Token) of
         ok -> {ok, revoked};

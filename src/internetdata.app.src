@@ -3,7 +3,7 @@
                 "licensed catalog and download IP, ASN and domain datasets"},
   {vsn, "1.7.0"},
   {registered, []},
-  {applications, [kernel, stdlib, inets, ssl, public_key]},
+  {applications, [kernel, stdlib, inets, ssl, public_key, crypto]},
   {env, []},
   {modules, []},
   {licenses, ["MIT"]},
