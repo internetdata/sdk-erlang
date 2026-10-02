@@ -5,7 +5,7 @@
 
 The official Erlang client library for the [InternetData](https://internetdata.io) database API.
 
-The library helps you browse the datasets your organization licenses and download them: IP, ASN and domain data, published as gzipped CSV and MMDB.
+The library helps you browse the datasets your organization licenses and download them: IP and ASN data, published as gzipped CSV and MMDB.
 
 ## Getting Started
 
@@ -181,7 +181,7 @@ There are official InternetData client libraries available for many languages in
 
 ## About InternetData
 
-IP, ASN and Domain data to reveal unique insights about the internet. APIs, Databases and Live Feeds available.
+Geolocation, anonymity, ownership and network databases for IP addresses and AS numbers, licensed as files you download and query yourself.
 
 [<img src="https://s3.internetdata.io/internetdata-public/brand/mark.svg" alt="InternetData" height="64"/>](https://internetdata.io/)
 
