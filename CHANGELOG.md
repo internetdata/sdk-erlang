@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.8.1 - 2026-10-04
+
+### Fixes
+
+- Re-pin the spec to 2026.10.03: metadata needs no license ([`09e9e8d`](https://github.com/internetdata/sdk-erlang/commit/09e9e8d0c38e2c991dc47828ccbcab5943428612))
+
 ## 1.8.0 - 2026-09-30
 
 ### Features
