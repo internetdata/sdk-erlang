@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.8.2 - 2026-10-05
+
+### Fixes
+
+- Hand a 503 to the client's retries at once on OTP 28.4 and later ([`bdcb291`](https://github.com/internetdata/sdk-erlang/commit/bdcb29190b3cd105ec1e668e1af87968b741c097))
+
 ## 1.8.1 - 2026-10-04
 
 ### Fixes
