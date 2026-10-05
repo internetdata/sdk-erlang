@@ -290,6 +290,28 @@ assert_backoff_used(RetryAfter) ->
 
     ?assertEqual({{ok, []}, 2}, {Answer, counters:get(Served, 1)}).
 
+%% httpc acts on a 503's `Retry-After' itself unless told not to, and from OTP 28.4
+%% waits out any value first, so each attempt would run to its 2 s timeout and fail
+%% as `network'. Three characters, because OTP 27's httpc loops on one or two in a
+%% way no client option stops, and leaves a longer value to the client.
+a_503_carrying_retry_after_reaches_the_retry_policy_test_() ->
+    {timeout, 60, fun() ->
+        Origin = internetdata_origin:start(#{unavailable => <<"100">>}),
+        Client = internetdata:new(#{base_url => internetdata_origin:base_url(Origin), api_key => <<"k">>,
+                                    retries => 2, timeout_ms => 2000}),
+        Calls = [{?LIST_PATH, fun() -> internetdata:database_list(Client) end},
+                 {<<"/unavailable">>, fun() ->
+                     internetdata:database_download_bytes(Client, <<"unavailable">>, mmdb)
+                 end}],
+        [begin
+             {Micros, Answer} = timer:tc(Call),
+             ?assertEqual({Path, 3}, {Path, internetdata_origin:hits(Origin, Path)}),
+             ?assertMatch({Path, {error, #{kind := server_error, status := 503}}}, {Path, Answer}),
+             ?assertEqual({Path, within}, {Path, within(Micros div 1000, {0, 1500})})
+         end || {Path, Call} <- Calls],
+        internetdata_origin:stop(Origin)
+    end}.
+
 a_body_that_is_not_json_is_not_a_crash_test() ->
     Stub = internetdata_stub:start(#{?LIST_PATH => #{raw => <<"<html>nope</html>">>}}),
     Client = client(Stub),
