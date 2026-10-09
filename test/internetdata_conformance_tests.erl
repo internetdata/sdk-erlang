@@ -181,6 +181,7 @@ family(Base, Standing, LicenseType) ->
         <<"name">> => Base,
         <<"summary">> => <<"a family">>,
         <<"standing">> => Standing,
+        <<"open">> => false,
         <<"license_type">> => LicenseType,
         <<"starts">> => null,
         <<"expires">> => null,

@@ -99,6 +99,7 @@ the_catalog_is_unwrapped_from_its_envelope_test() ->
     {ok, [Database]} = internetdata:database_list(Client),
 
     ?assertEqual(<<"bogon_ip">>, maps:get(base, Database)),
+    ?assertEqual(true, maps:get(open, Database)),
     ?assertEqual([<<"csvgz">>, <<"mmdb">>],
                  maps:get(formats, hd(maps:get(versions, Database)))),
     ?assertEqual(<<"bogon_ip_v1">>, maps:get(id, hd(maps:get(versions, Database)))),
@@ -181,7 +182,8 @@ checksums_are_unwrapped_past_their_envelope_test() ->
 
 the_download_history_is_unwrapped_and_keeps_its_nulls_test() ->
     Attempt = #{<<"dataset_id">> => <<"bogon_ip_v1">>, <<"format">> => <<"csvgz">>,
-                <<"outcome">> => <<"denied">>, <<"sample">> => true, <<"bytes">> => null,
+                <<"outcome">> => <<"denied">>, <<"sample">> => true, <<"open">> => false,
+                <<"bytes">> => null,
                 <<"http_status">> => 403, <<"apikey_id">> => null,
                 <<"client_ip">> => <<"203.0.113.7">>, <<"user_agent">> => null,
                 <<"created">> => <<"2026-09-04T10:00:00.000Z">>},
@@ -192,6 +194,7 @@ the_download_history_is_unwrapped_and_keeps_its_nulls_test() ->
 
     ?assertEqual(<<"denied">>, maps:get(outcome, Download)),
     ?assertEqual(true, maps:get(sample, Download)),
+    ?assertEqual(false, maps:get(open, Download)),
     %% A refusal moved no bytes and resolved no key. Turning either null into a
     %% zero or an empty string would invent an answer.
     ?assertEqual(null, maps:get(bytes, Download)),
@@ -446,6 +449,7 @@ family() ->
         <<"name">> => <<"Bogon IP">>,
         <<"summary">> => <<"Unroutable address space">>,
         <<"standing">> => <<"licensed">>,
+        <<"open">> => true,
         <<"license_type">> => <<"redistribute">>,
         <<"starts">> => <<"2026-01-01T00:00:00.000Z">>,
         <<"expires">> => null,
