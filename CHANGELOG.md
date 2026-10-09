@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.9.0 - 2026-10-09
+
+### Features
+
+- Re-pin the spec to 2026.10.08, adding the Open databases' open flag ([`e42f80d`](https://github.com/internetdata/sdk-erlang/commit/e42f80db1dbed6b877cff0e26a40f1a1ecdca5a3))
+
 ## 1.8.2 - 2026-10-05
 
 ### Fixes
