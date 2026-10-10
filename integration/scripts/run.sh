@@ -82,11 +82,13 @@ function inImage() {
         script="$1"
     fi
 
+    # The key reaches docker by NAME: a value on its command line is visible to ps.
+    export INTERNETDATA_STAGING_KEY="${INTERNETDATA_STAGING_KEY:-}"
     docker run --rm \
         -e HOME=/tmp \
         -e LANG=C.UTF-8 \
         -e "INTERNETDATA_STAGING_URL=${INTERNETDATA_STAGING_URL:-}" \
-        -e "INTERNETDATA_STAGING_KEY=${INTERNETDATA_STAGING_KEY:-}" \
+        -e INTERNETDATA_STAGING_KEY \
         -v "$PWD:/src:ro" \
         "$OTP_IMAGE" sh -euc "
             cp -R /src /w
