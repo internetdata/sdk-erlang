@@ -12,6 +12,8 @@
 %%                               package or a matching version does not exist
 %%   resolve.escript resolved    what rebar.lock says the dependency came from,
 %%                               as `pkg <version>', `other <term>' or `missing'
+%%   resolve.escript checksum    fails unless the tarball rebar.lock records is
+%%                               the one hex.pm publishes for that version
 %%
 %% Nothing here names the package: it is read from rebar.config, so the gate and
 %% the resolver cannot disagree about what is being asked for, and pointing the
@@ -33,8 +35,11 @@ main(["published"]) ->
 main(["resolved"]) ->
     {Name, _Constraint} = dep(),
     io:format("~s~n", [locked(Name)]);
+main(["checksum"]) ->
+    {Name, _Constraint} = dep(),
+    checksum(Name);
 main(_) ->
-    die("usage: resolve.escript package|published|resolved").
+    die("usage: resolve.escript package|published|resolved|checksum").
 
 %% Exactly one dependency, and it is the package under test. More than one would
 %% make "the constraint" ambiguous, so it fails rather than picking.
@@ -56,16 +61,37 @@ text(Other) -> die(io_lib:format("~p is not a hex constraint", [Other])).
 %% so this is the set `rebar3' would resolve from. A 404 means the package has
 %% never been published, which is the state before the first release.
 releases(Name) ->
+    case api(["/packages/", Name]) of
+        {200, Body} -> [V || #{<<"version">> := V} <- maps:get(<<"releases">>, json:decode(Body), [])];
+        {404, _} -> []
+    end.
+
+%% rebar3 checks a tarball against the registry it came from, and records its
+%% checksum in rebar.lock; that registry is hex.pm's only if nothing in rebar3's
+%% configuration names another, which the lock does not say. So the checksum is
+%% held to the one hex.pm's API lists for the release.
+checksum(Name) ->
+    {Vsn, Locked} = locked_checksum(Name),
+    Published = case api(["/packages/", Name, "/releases/", Vsn]) of
+        {200, Body} -> maps:get(<<"checksum">>, json:decode(Body), undefined);
+        {404, _} -> undefined
+    end,
+    case is_binary(Published) andalso string:lowercase(Published) =:= Locked of
+        true ->
+            io:format("==> ~s-~s.tar is the tarball hex.pm publishes, sha256 ~s~n", [Name, Vsn, Locked]);
+        false ->
+            die(io_lib:format("the ~s-~s.tar rebar3 resolved has sha256 ~s where hex.pm publishes ~p, "
+                              "so it is not the released package", [Name, Vsn, Locked, Published]))
+    end.
+
+api(Path) ->
     {ok, _} = application:ensure_all_started(inets),
     {ok, _} = application:ensure_all_started(ssl),
-    Url = "https://hex.pm/api/packages/" ++ Name,
-    Request = {Url, [{"user-agent", "internetdata-sdk-integration"},
-                     {"accept", "application/json"}]},
+    Url = lists:flatten(["https://hex.pm/api" | Path]),
+    Request = {Url, [{"user-agent", "internetdata-sdk-integration"}, {"accept", "application/json"}]},
     case httpc:request(get, Request, [{timeout, 30000}], [{body_format, binary}]) of
-        {ok, {{_, 200, _}, _, Body}} ->
-            [V || #{<<"version">> := V} <- maps:get(<<"releases">>, json:decode(Body), [])];
-        {ok, {{_, 404, _}, _, _}} ->
-            [];
+        {ok, {{_, Status, _}, _, Body}} when Status =:= 200; Status =:= 404 ->
+            {Status, Body};
         {ok, {{_, Status, _}, _, _}} ->
             die(io_lib:format("hex answered ~b for ~s", [Status, Url]));
         {error, Reason} ->
@@ -133,6 +159,17 @@ entry(Name, Deps) ->
         {_, {pkg, _, Vsn}, _} -> ["pkg ", Vsn];
         {_, Source, _} -> io_lib:format("other ~p", [Source]);
         false -> "missing"
+    end.
+
+%% The version locked and the outer checksum beside it, the sha256 of the whole
+%% tarball, which is what hex's API lists as a release's checksum.
+locked_checksum(Name) ->
+    {ok, Terms} = file:consult("rebar.lock"),
+    Key = list_to_binary(Name),
+    Hashes = lists:append([proplists:get_value(pkg_hash_ext, T, []) || T <- Terms, is_list(T)]),
+    case {lists:keyfind(Key, 1, deps(Terms)), lists:keyfind(Key, 1, Hashes)} of
+        {{_, {pkg, _, Vsn}, _}, {_, Hash}} -> {binary_to_list(Vsn), string:lowercase(Hash)};
+        _ -> die(io_lib:format("rebar.lock records no package checksum for ~s", [Name]))
     end.
 
 die(Message) ->
