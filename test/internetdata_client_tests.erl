@@ -27,6 +27,62 @@ a_keyless_client_sends_no_authorization_header_test() ->
     ?assertEqual(3, internetdata_stub:calls(Stub)),
     internetdata_stub:stop(Stub).
 
+%% A blank key is what an unset secret interpolates to, and `Bearer' with a blank
+%% behind it reads as a wrong key rather than as none.
+a_blank_key_sends_no_authorization_header_test() ->
+    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => []}}}),
+    [begin
+         {ok, []} = internetdata:database_list(internetdata:new(#{api_key => Key,
+                                                                  http => internetdata_stub:http(Stub)}))
+     end || Key <- [<<"   ">>, <<"\t">>, " \r\n "]],
+
+    [?assertEqual(false, lists:keyfind(<<"authorization">>, 1, Headers))
+     || Headers <- internetdata_stub:headers_seen(Stub)],
+    ?assertEqual(3, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+%% A key read from a file ends with a newline; the blanks around a key are no
+%% part of it.
+a_key_is_sent_without_the_blanks_around_it_test() ->
+    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => []}}}),
+    [{ok, []} = internetdata:database_list(internetdata:new(#{api_key => Key, http => internetdata_stub:http(Stub)}))
+     || Key <- [<<"sekrit\n">>, "sekrit\r\n", <<" \tsekrit ">>]],
+
+    [?assertEqual({<<"authorization">>, <<"Bearer sekrit">>}, lists:keyfind(<<"authorization">>, 1, Headers))
+     || Headers <- internetdata_stub:headers_seen(Stub)],
+    internetdata_stub:stop(Stub).
+
+%% httpc writes a header value out as it is given, so a control character inside
+%% the key reached the wire, and a CR LF started a header of its own.
+a_key_holding_a_control_character_is_refused_by_new_test() ->
+    Stub = internetdata_stub:start(#{}),
+    Keys = [<<"sekrit\r\nx-injected: 1">>, "sek\nrit", <<"sek", 1, "rit">>, <<"sekrit", 127>>, <<"sek\trit">>],
+    [?assertError({badarg, {api_key, control_character}},
+                  internetdata:new(#{api_key => Key, http => internetdata_stub:http(Stub)}))
+     || Key <- Keys],
+    ?assertEqual(0, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+%% Erlang orders every atom above every number, so `infinity' retried an outage
+%% for ever.
+a_retries_that_is_not_a_count_is_refused_by_new_test() ->
+    [?assertError({badarg, {retries, V}}, internetdata:new(#{retries => V}))
+     || V <- [infinity, -1, 1.5, foo, "2"]],
+    [?assertMatch(#{retries := V}, internetdata:new(#{retries => V})) || V <- [0, 5]].
+
+%% A library is seldom started, so the version has to come from loading it.
+the_client_names_itself_and_this_release_test() ->
+    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => []}}}),
+    _ = application:unload(internetdata),
+
+    {ok, []} = internetdata:database_list(client(Stub)),
+
+    {ok, Vsn} = application:get_key(internetdata, vsn),
+    [Headers] = internetdata_stub:headers_seen(Stub),
+    ?assertEqual({<<"user-agent">>, iolist_to_binary(["internetdata-erlang/", Vsn])},
+                 lists:keyfind(<<"user-agent">>, 1, Headers)),
+    internetdata_stub:stop(Stub).
+
 %% `new/0' is production with no key, which is the whole of the keyless surface.
 new_with_no_options_at_all_builds_test() ->
     ?assertMatch(#{api_key := undefined}, internetdata:new()).
@@ -105,13 +161,42 @@ the_catalog_is_unwrapped_from_its_envelope_test() ->
     ?assertEqual(<<"bogon_ip_v1">>, maps:get(id, hd(maps:get(versions, Database)))),
     internetdata_stub:stop(Stub).
 
-an_envelope_that_is_missing_is_reported_rather_than_guessed_test() ->
-    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"datasets">> => []}}}),
-    Client = client(Stub),
+%% A proxy's HTML page, a cut-off body, `null' or an object without the member a
+%% call returns is the server's failure, not an answer: a retried server_error
+%% carrying the status, as any outage is.
+a_2xx_the_call_cannot_read_is_a_retried_server_error_test_() ->
+    Unreadable = [<<"<html>gateway</html>">>, <<"{\"databases\":">>, <<>>, <<"null">>, <<"[]">>,
+                  <<"\"databases\"">>, <<"{}">>],
+    Calls = [{?LIST_PATH, <<"databases">>, fun internetdata:database_list/1},
+             {?METADATA_PATH, <<"id">>, fun(C) -> internetdata:database_metadata(C, <<"bogon_ip_v1">>) end},
+             {?CHECKSUM_PATH, <<"checksums">>,
+              fun(C) -> internetdata:database_checksums(C, <<"bogon_ip_v1">>, mmdb) end},
+             {?DOWNLOADS_PATH, <<"downloads">>, fun internetdata:database_downloads/1}],
+    WrongTypes = [{?LIST_PATH, <<"{\"databases\":{}}">>}, {?LIST_PATH, <<"{\"databases\":null}">>},
+                  {?LIST_PATH, <<"{\"databases\":[1]}">>}, {?CHECKSUM_PATH, <<"{\"checksums\":[]}">>},
+                  {?DOWNLOADS_PATH, <<"{\"downloads\":{}}">>}, {?DOWNLOADS_PATH, <<"{\"downloads\":[null]}">>},
+                  {?METADATA_PATH, <<"{\"id\":null}">>}],
+    [{binary_to_list(<<Path/binary, " ", Body/binary>>), fun() -> assert_unreadable(Path, Body, Call) end}
+     || {Path, _Member, Call} <- Calls, Body <- Unreadable]
+    ++ [{binary_to_list(<<Path/binary, " ", Body/binary>>),
+         fun() -> assert_unreadable(Path, Body, call_for(Path, Calls)) end} || {Path, Body} <- WrongTypes]
+    ++ [{"a 2xx in place of the download link's redirect", fun() ->
+            assert_unreadable(?DOWNLOAD_PATH, <<"{}">>, fun(C) ->
+                internetdata:database_download_url(C, <<"bogon_ip_v1">>, mmdb)
+            end)
+        end}].
 
-    ?assertMatch({error, #{kind := server_error, retryable := false}},
-                 internetdata:database_list(Client)),
+assert_unreadable(Path, Body, Call) ->
+    Stub = internetdata_stub:start(#{Path => #{raw => Body}}),
+    Client = internetdata:new(#{api_key => <<"k">>, retries => 1, http => internetdata_stub:http(Stub)}),
+
+    ?assertMatch({error, #{kind := server_error, retryable := true, status := 200}}, Call(Client)),
+    ?assertEqual(2, internetdata_stub:calls(Stub)),
     internetdata_stub:stop(Stub).
+
+call_for(Path, Calls) ->
+    {Path, _Member, Call} = lists:keyfind(Path, 1, Calls),
+    Call.
 
 %% v2's metadata IS the response, with no `data' member around it. v1 wraps, so
 %% unwrapping one level here would answer `undefined' for every field.
@@ -315,13 +400,70 @@ a_503_carrying_retry_after_reaches_the_retry_policy_test_() ->
         internetdata_origin:stop(Origin)
     end}.
 
-a_body_that_is_not_json_is_not_a_crash_test() ->
-    Stub = internetdata_stub:start(#{?LIST_PATH => #{raw => <<"<html>nope</html>">>}}),
-    Client = client(Stub),
+%% An empty code says nothing, so it gives way to the status: it answered a
+%% refusal with a message of nothing at all.
+an_empty_result_code_gives_way_to_the_status_test_() ->
+    Status = <<"request failed with status 403">>,
+    Cases = [{#{<<"rc">> => <<"UNAUTHORIZED_ID">>}, <<"UNAUTHORIZED_ID">>}, {#{<<"rc">> => <<>>}, Status},
+             {#{<<"rc">> => null}, Status}, {#{<<"rc">> => 7}, Status}, {#{}, Status}],
+    [{binary_to_list(iolist_to_binary(json:encode(Body))), fun() ->
+         Stub = internetdata_stub:start(#{?LIST_PATH => #{status => 403, body => Body}}),
+         ?assertMatch({error, #{kind := forbidden, message := Want}}, internetdata:database_list(client(Stub))),
+         internetdata_stub:stop(Stub)
+     end} || {Body, Want} <- Cases].
 
-    ?assertMatch({error, #{kind := server_error, retryable := false}},
-                 internetdata:database_list(Client)),
-    internetdata_stub:stop(Stub).
+%% Digits, or an HTTP date in one of RFC 9110's three forms, in GMT, and nothing
+%% else. httpd_util read any zone as GMT, a day that does not exist as one that
+%% does or as a crash in the caller, and the digits took a sign.
+a_retry_after_is_digits_or_an_http_date_and_nothing_else_test_() ->
+    At = calendar:system_time_to_universal_time(erlang:system_time(second) + 60, second),
+    {{Y, Mo, D}, {H, Mi, S}} = At,
+    Day = lists:nth(calendar:day_of_the_week(Y, Mo, D), ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+    Weekday = lists:nth(calendar:day_of_the_week(Y, Mo, D),
+                        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]),
+    Mon = lists:nth(Mo, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]),
+    Clock = io_lib:format("~2..0b:~2..0b:~2..0b", [H, Mi, S]),
+    Imf = io_lib:format("~s, ~2..0b ~s ~b ~s", [Day, D, Mon, Y, Clock]),
+    Next = Y + 1,
+    Cases = [
+        {"0", rate_limited}, {"120", rate_limited}, {" 7 ", rate_limited},
+        {[Imf, " GMT"], rate_limited},
+        {io_lib:format("~s, ~2..0b-~s-~2..0b ~s GMT", [Weekday, D, Mon, Y rem 100, Clock]), rate_limited},
+        {io_lib:format("~s ~s ~2b ~s ~b", [Day, Mon, D, Clock, Y]), rate_limited},
+        {[Imf, " +0000"], quota_exceeded}, {[Imf, " +0500"], quota_exceeded},
+        {[Imf, " EST"], quota_exceeded}, {[Imf, " PST"], quota_exceeded}, {[Imf, " gmt"], quota_exceeded},
+        {io_lib:format("~b-~2..0b-~2..0bT~sZ", [Y, Mo, D, Clock]), quota_exceeded},
+        {io_lib:format("Xyz, ~2..0b ~s ~b ~s GMT", [D, Mon, Y, Clock]), quota_exceeded},
+        {io_lib:format("~s, ~2..0b Foo ~b ~s GMT", [Day, D, Y, Clock]), quota_exceeded},
+        {io_lib:format("~2..0b ~s ~b ~s GMT", [D, Mon, Y, Clock]), quota_exceeded},
+        {io_lib:format("Tue, 31 Nov ~b 08:49:37 GMT", [Next]), quota_exceeded},
+        {io_lib:format("Mon, 30 Feb ~b 08:49:37 GMT", [Next]), quota_exceeded},
+        {io_lib:format("Fri, 01 Jan ~b 25:00:00 GMT", [Next]), quota_exceeded},
+        {io_lib:format("Fri, 01 Jan ~b 25:61:61 GMT", [Next]), quota_exceeded},
+        {io_lib:format("Fri, 01 Jan ~b 08:61:00 GMT", [Next]), quota_exceeded},
+        {"1.5", quota_exceeded}, {"+1", quota_exceeded}, {"-1", quota_exceeded},
+        {"0x10", quota_exceeded}, {"1_0", quota_exceeded}, {"1e3", quota_exceeded},
+        {"tomorrow", quota_exceeded}, {"", quota_exceeded}
+    ],
+    [{lists:flatten(io_lib:format("Retry-After '~s'", [Value])), fun() -> assert_kind(Value, Kind) end}
+     || {Value, Kind} <- Cases]
+    ++ [{"a date is read as the seconds until it, in GMT", fun() ->
+            {error, #{retry_after := Seconds}} = throttled(iolist_to_binary([Imf, " GMT"])),
+            ?assert(Seconds >= 55 andalso Seconds =< 60)
+        end},
+        {"a date already past is a wait of nothing", fun() ->
+            ?assertMatch({error, #{kind := rate_limited, retry_after := 0}},
+                         throttled(<<"Sun, 06 Nov 1994 08:49:37 GMT">>))
+        end}].
+
+assert_kind(Value, Kind) ->
+    ?assertMatch({error, #{kind := Kind}}, throttled(iolist_to_binary(Value))).
+
+throttled(Value) ->
+    Http = fun(_Request) ->
+        {ok, #{status => 429, headers => [{<<"retry-after">>, Value}], body => <<>>}}
+    end,
+    internetdata:database_list(internetdata:new(#{api_key => <<"k">>, retries => 0, http => Http})).
 
 %% `format()' checks nothing once compiled, so an atom from a flag or a config
 %% file has to be refused at runtime, before it costs a request.

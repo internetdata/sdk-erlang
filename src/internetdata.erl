@@ -81,7 +81,10 @@ new() ->
 %% scope is added to it.
 %%
 %% `timeout_ms' is milliseconds from 1 to 4294967295, or `infinity' for no bound,
-%% and anything else raises `badarg' here rather than failing every call.
+%% and `retries' an integer of 0 or more; anything else raises `badarg' here
+%% rather than failing every call. The key is trimmed, and one of blanks alone is
+%% no key; one holding a control character raises
+%% `{badarg, {api_key, control_character}}', naming the cause and not the key.
 -spec new(options()) -> client().
 new(Options) ->
     TimeoutMs = maps:get(timeout_ms, Options, ?DEFAULT_TIMEOUT_MS),
@@ -89,14 +92,22 @@ new(Options) ->
         true -> ok;
         false -> erlang:error({badarg, {timeout_ms, TimeoutMs}})
     end,
+    %% Erlang orders every atom above every number, so `infinity' would retry an
+    %% outage for ever.
+    Retries = maps:get(retries, Options, ?DEFAULT_RETRIES),
+    case is_integer(Retries) andalso Retries >= 0 of
+        true -> ok;
+        false -> erlang:error({badarg, {retries, Retries}})
+    end,
+    Key = api_key(Options),
     case maps:is_key(http, Options) of
         false -> internetdata_http:ensure_ready();
         true -> ok
     end,
     #{
         base_url => trim_slashes(bin(maps:get(base_url, Options, ?DEFAULT_BASE_URL))),
-        api_key => api_key(Options),
-        retries => maps:get(retries, Options, ?DEFAULT_RETRIES),
+        api_key => Key,
+        retries => Retries,
         timeout_ms => TimeoutMs,
         user_agent => user_agent(),
         http => maps:get(http, Options, internetdata_http:httpc_fun())
@@ -133,7 +144,7 @@ license_types() ->
 %% rather than from the family itself.
 -spec database_list(client()) -> {ok, [map()]} | {error, internetdata_error:error()}.
 database_list(Client) ->
-    case unwrap(get_json(Client, <<"/api/v2/database/list">>, []), <<"databases">>) of
+    case get_json(Client, <<"/api/v2/database/list">>, [], {<<"databases">>, list}) of
         {ok, Databases} -> {ok, internetdata_result:databases(Databases)};
         {error, Error} -> {error, Error}
     end.
@@ -148,7 +159,7 @@ database_list(Client) ->
 -spec database_metadata(client(), binary() | string()) ->
     {ok, map()} | {error, internetdata_error:error()}.
 database_metadata(Client, Id) ->
-    case get_json(Client, <<"/api/v2/database/metadata">>, [{<<"id">>, bin(Id)}]) of
+    case get_json(Client, <<"/api/v2/database/metadata">>, [{<<"id">>, bin(Id)}], {whole, [<<"id">>]}) of
         {ok, Body} -> {ok, internetdata_result:metadata(Body)};
         {error, Error} -> {error, Error}
     end.
@@ -163,7 +174,7 @@ database_checksums(Client, Id, Format) ->
     case format_name(Format) of
         {ok, Name} ->
             Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name}],
-            case unwrap(get_json(Client, <<"/api/v2/database/checksum">>, Query), <<"checksums">>) of
+            case get_json(Client, <<"/api/v2/database/checksum">>, Query, {<<"checksums">>, map}) of
                 {ok, Checksums} -> {ok, internetdata_result:checksums(Checksums)};
                 {error, Error} -> {error, Error}
             end;
@@ -191,7 +202,7 @@ database_downloads(Client, Options) ->
     Path = <<"/api/v2/database/downloads">>,
     case check_timeout(Options) of
         ok ->
-            case unwrap(get_json(bound(Client, Options), Path, Query), <<"downloads">>) of
+            case get_json(bound(Client, Options), Path, Query, {<<"downloads">>, list}) of
                 {ok, Downloads} -> {ok, internetdata_result:downloads(Downloads)};
                 {error, Error} -> {error, Error}
             end;
@@ -482,8 +493,8 @@ io_error(Path, Reason) ->
 message(Path, Reason) ->
     iolist_to_binary([Path, ": ", file:format_error(Reason)]).
 
-get_json(Client, Path, Query) ->
-    internetdata_http:get_json(Client, Path, Query, maps:get(retries, Client)).
+get_json(Client, Path, Query, Member) ->
+    internetdata_http:get_json(Client, Path, Query, maps:get(retries, Client), Member).
 
 %% The client with this call's `timeout_ms' in place of its own, which is the one
 %% the transport reads for every request it builds.
@@ -520,26 +531,32 @@ format_name(Format) ->
                       message => iolist_to_binary(Message)}}
     end.
 
-unwrap({ok, Body}, Key) ->
-    case Body of
-        #{Key := Value} -> {ok, Value};
-        _ -> {error, #{kind => server_error, retryable => false,
-                       message => <<"response did not carry a \"", Key/binary, "\" member">>}}
-    end;
-unwrap({error, Error}, _Key) ->
-    {error, Error}.
-
-%% Empty counts as absent, so a `${{ secrets.MISSING }}' that interpolated to
-%% nothing presents no credential rather than a bearer token of one space.
-%% Whether the key reached the wire is asserted in the suites.
+%% Blank counts as absent: it is what an unset `${{ secrets.X }}' interpolates
+%% to, and sent, `Bearer' with nothing after it reads as a wrong key rather than
+%% as none. httpc writes a header value out as given, so a control character
+%% left inside would reach the wire with every call, and a CR LF would start a
+%% header of its own. A key read from a file ends with a newline, which the trim
+%% takes.
 api_key(Options) ->
     case maps:get(api_key, Options, undefined) of
-        undefined -> undefined;
+        undefined ->
+            undefined;
         Key ->
-            case bin(Key) of
-                <<>> -> undefined;
-                Bin -> Bin
+            Trimmed = trim_blank(bin(Key)),
+            case {Trimmed, lists:any(fun(C) -> C < 32 orelse C =:= 127 end, binary_to_list(Trimmed))} of
+                {<<>>, _} -> undefined;
+                {_, false} -> Trimmed;
+                {_, true} -> erlang:error({badarg, {api_key, control_character}})
             end
+    end.
+
+trim_blank(<<C, Rest/binary>>) when C =:= $\s; C >= $\t, C =< $\r ->
+    trim_blank(Rest);
+trim_blank(Value) ->
+    Size = byte_size(Value),
+    case Size > 0 andalso binary:last(Value) of
+        C when C =:= $\s; C >= $\t, C =< $\r -> trim_blank(binary:part(Value, 0, Size - 1));
+        _ -> Value
     end.
 
 %% Every one, not only the last: each path appended starts with its own `/', and
@@ -552,7 +569,10 @@ trim_slashes(Url) ->
         _ -> Url
     end.
 
+%% Loaded first: a library is seldom started, and an application that is not
+%% loaded has no `vsn' to read.
 user_agent() ->
+    _ = application:load(internetdata),
     Version = case application:get_key(internetdata, vsn) of
         {ok, Vsn} -> list_to_binary(Vsn);
         undefined -> <<"dev">>
