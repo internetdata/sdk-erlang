@@ -2,6 +2,13 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.9.2 - 2026-10-11
+
+### Fixes
+
+- Read Retry-After as digits or an RFC 9110 date in GMT, never crashing ([`55295d2`](https://github.com/internetdata/sdk-erlang/commit/55295d2efe88a5b34a2c92759d223cc5b7173cca))
+- Trim the key and refuse a control character in it; retry an unreadable 2xx ([`6e7bd62`](https://github.com/internetdata/sdk-erlang/commit/6e7bd620efe62dbc36357d60a06df1efa191ebe6))
+
 ## 1.9.1 - 2026-10-10
 
 ### Fixes
