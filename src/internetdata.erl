@@ -136,8 +136,9 @@ license_types() ->
 %% The whole published catalog, not only what you license: `standing' says
 %% whether a family is yours today (`&lt;&lt;"licensed"&gt;&gt;'), was
 %% (`&lt;&lt;"expired"&gt;&gt;'), or has never been bought
-%% (`&lt;&lt;"unlicensed"&gt;&gt;'). An `open' family downloads with no license,
-%% under CC BY-SA 4.0, whatever its `standing'.
+%% (`&lt;&lt;"unlicensed"&gt;&gt;'). An `open' family is free under CC BY-SA 4.0,
+%% and every organization holds a `standard' license to it from the start, which
+%% `standing' and `license_type' report like any other.
 %%
 %% A license covers a family (`base'), while a download names one of its
 %% versions, so the ids the other calls take come from a family's `versions'
