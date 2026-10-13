@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.9.3 - 2026-10-13
+
+### Fixes
+
+- Re-pin the spec to 2026.10.13: Open databases come with a license ([`f629df2`](https://github.com/internetdata/sdk-erlang/commit/f629df22e42d6b40dd0c66087c93a369a96c7054))
+
 ## 1.9.2 - 2026-10-11
 
 ### Fixes
