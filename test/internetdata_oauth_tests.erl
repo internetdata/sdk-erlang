@@ -220,17 +220,42 @@ an_answer_missing_any_one_required_member_is_an_ordinary_server_error_test_() ->
             {<<"exchangeDeviceCode">>, [<<"access_token">>, <<"token_type">>, <<"expires_in">>]}
         ],
         Args = #{<<"clientId">> => ?CLIENT_ID, <<"deviceCode">> => <<"mo_dc_x">>},
+        %% Discovery and device authorization take the client's retries, 2 by
+        %% default, so an answer they cannot read is sent three times; an exchange
+        %% spends what it presents and is sent once.
+        Sends = #{<<"metadata">> => 3, <<"deviceAuthorization">> => 3, <<"exchangeDeviceCode">> => 1},
         [begin
-             {Origin, Client} = keyless([#{<<"status">> => 200, <<"body">> => maps:remove(Member, Every)}]),
+             Sent = maps:get(Operation, Sends),
+             Answer = #{<<"status">> => 200, <<"body">> => maps:remove(Member, Every)},
+             {Origin, Client} = keyless(lists:duplicate(Sent, Answer)),
              Outcome = bounded(fun() -> call(Client, Operation, Args) end),
-             ?assertEqual({Operation, Member, 1},
+             ?assertEqual({Operation, Member, Sent},
                           {Operation, Member, length(internetdata_oauth_origin:requests(Origin))}),
-             ?assertMatch({Operation, Member, {error, #{kind := server_error, status := 200}}},
+             ?assertMatch({Operation, Member, {error, #{kind := server_error, status := 200, retryable := true}}},
                           {Operation, Member, Outcome}),
              {error, Error} = Outcome,
              ?assertNot(maps:is_key(error_code, Error)),
              internetdata_oauth_origin:stop(Origin)
          end || {Operation, Members} <- Required, Member <- Members]
+    end}.
+
+%% A proxy's page, an empty body, a JSON value that is not an object, or one cut
+%% off: each is the retried server error carrying the status, never one sent once.
+an_unreadable_answer_to_discovery_or_device_authorization_is_retried_test_() ->
+    {timeout, 60, fun() ->
+        Bodies = [<<"<html><body>502 Bad Gateway</body></html>">>, <<>>, <<"null">>, <<"[]">>,
+                  <<"{\"issuer\": \"https://">>],
+        Args = #{<<"clientId">> => ?CLIENT_ID},
+        [begin
+             Answer = #{<<"status">> => 200, <<"rawBody">> => Body},
+             {Origin, Client} = keyless(lists:duplicate(3, Answer)),
+             Outcome = bounded(fun() -> call(Client, Operation, Args) end),
+             ?assertEqual({Operation, Body, 3},
+                          {Operation, Body, length(internetdata_oauth_origin:requests(Origin))}),
+             ?assertMatch({Operation, Body, {error, #{kind := server_error, status := 200, retryable := true}}},
+                          {Operation, Body, Outcome}),
+             internetdata_oauth_origin:stop(Origin)
+         end || Operation <- [<<"metadata">>, <<"deviceAuthorization">>], Body <- Bodies]
     end}.
 
 %% Against an origin that stalls past both bounds, each function's own 300 ms
