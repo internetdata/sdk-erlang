@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.9.4 - 2026-10-15
+
+### Fixes
+
+- Retry an unreadable answer to OAuth discovery and device authorization ([`afd627d`](https://github.com/internetdata/sdk-erlang/commit/afd627d59c4866cfc7b4986f3bdfa8e0ca0ab3a5))
+
 ## 1.9.3 - 2026-10-13
 
 ### Fixes
