@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.9.5 - 2026-10-16
+
+### Fixes
+
+- Re-pin the spec to 2026.10.15: three descriptions in US spelling ([`a846cfb`](https://github.com/internetdata/sdk-erlang/commit/a846cfbdf1901f033ff1b0e3295b01342f46230c))
+
 ## 1.9.4 - 2026-10-15
 
 ### Fixes
