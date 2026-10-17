@@ -186,6 +186,66 @@ a_2xx_the_call_cannot_read_is_a_retried_server_error_test_() ->
             end)
         end}].
 
+%% A member of another type than the spec's, at any depth, is no answer either:
+%% a version served as "3" was handed back as the binary, and an entry
+%% without the members the spec requires as an empty map (1.10.0).
+a_member_of_the_wrong_type_at_any_depth_is_a_retried_server_error_test_() ->
+    Family = family(),
+    [Version] = maps:get(<<"versions">>, Family),
+    Listing = fun(F) -> #{<<"databases">> => [F]} end,
+    Attempt = download(),
+    Sums = #{<<"md5">> => <<"m">>, <<"sha1">> => <<"s1">>, <<"sha256">> => <<"s256">>, <<"sha512">> => <<"s512">>},
+    Cases = [
+        {?LIST_PATH, Listing(Family#{<<"versions">> => [Version#{<<"version">> => <<"3">>}]})},
+        {?LIST_PATH, Listing(Family#{<<"versions">> => [Version#{<<"version">> => <<"x">>}]})},
+        {?LIST_PATH, Listing(Family#{<<"versions">> => [Version#{<<"formats">> => [1]}]})},
+        {?LIST_PATH, Listing(Family#{<<"versions">> => [maps:remove(<<"id">>, Version)]})},
+        {?LIST_PATH, Listing(Family#{<<"versions">> => [1]})},
+        {?LIST_PATH, Listing(Family#{<<"open">> => <<"yes">>})},
+        {?LIST_PATH, Listing(Family#{<<"expires">> => 1})},
+        {?LIST_PATH, Listing(Family#{<<"base">> => null})},
+        {?LIST_PATH, Listing(#{})},
+        {?METADATA_PATH, (metadata())#{<<"entries">> => <<"42">>}},
+        {?METADATA_PATH, (metadata())#{<<"size">> => #{<<"csvgz">> => <<"760">>}}},
+        {?METADATA_PATH, (metadata())#{<<"size">> => <<"760">>}},
+        {?METADATA_PATH, (metadata())#{<<"schema">> => #{<<"csvgz">> => [#{<<"name">> => 1, <<"type">> => <<"t">>}]}}},
+        {?METADATA_PATH, (metadata())#{<<"sample">> => #{<<"csvgz">> => [1]}}},
+        {?METADATA_PATH, maps:remove(<<"updated">>, metadata())},
+        {?CHECKSUM_PATH, #{<<"checksums">> => Sums#{<<"sha256">> => 1}}},
+        {?CHECKSUM_PATH, #{<<"checksums">> => maps:remove(<<"sha512">>, Sums)}},
+        {?DOWNLOADS_PATH, #{<<"downloads">> => [Attempt#{<<"bytes">> => <<"10">>}]}},
+        {?DOWNLOADS_PATH, #{<<"downloads">> => [Attempt#{<<"open">> => <<"true">>}]}},
+        {?DOWNLOADS_PATH, #{<<"downloads">> => [Attempt#{<<"created">> => null}]}}
+    ],
+    Calls = #{?LIST_PATH => fun internetdata:database_list/1,
+              ?METADATA_PATH => fun(C) -> internetdata:database_metadata(C, <<"bogon_ip_v1">>) end,
+              ?CHECKSUM_PATH => fun(C) -> internetdata:database_checksums(C, <<"bogon_ip_v1">>, mmdb) end,
+              ?DOWNLOADS_PATH => fun internetdata:database_downloads/1},
+    [begin
+         Body = iolist_to_binary(json:encode(Wire)),
+         {binary_to_list(<<Path/binary, " ", Body/binary>>),
+          fun() -> assert_unreadable(Path, Body, maps:get(Path, Calls)) end}
+     end || {Path, Wire} <- Cases].
+
+%% The nullable members stay answers when null, and the optional ones when
+%% absent: refusing those would fail every refused download and every family
+%% with no license.
+nullable_and_optional_members_stay_an_answer_test() ->
+    Family = maps:without([<<"license_type">>, <<"starts">>, <<"renews_at">>, <<"notice_due_at">>],
+                          (family())#{<<"expires">> => null}),
+    Attempt = (download())#{<<"bytes">> => null, <<"http_status">> => null, <<"apikey_id">> => null,
+                            <<"client_ip">> => null, <<"user_agent">> => null},
+    Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => [Family]}},
+                                     ?METADATA_PATH => #{body => maps:remove(<<"sample">>, metadata())},
+                                     ?DOWNLOADS_PATH => #{body => #{<<"downloads">> => [Attempt]}}}),
+    Client = client(Stub),
+
+    ?assertMatch({ok, [_]}, internetdata:database_list(Client)),
+    ?assertMatch({ok, #{entries := 42}}, internetdata:database_metadata(Client, <<"bogon_ip_v1">>)),
+    ?assertMatch({ok, [#{bytes := null}]}, internetdata:database_downloads(Client)),
+    ?assertEqual(3, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
 assert_unreadable(Path, Body, Call) ->
     Stub = internetdata_stub:start(#{Path => #{raw => Body}}),
     Client = internetdata:new(#{api_key => <<"k">>, retries => 1, http => internetdata_stub:http(Stub)}),
@@ -613,6 +673,12 @@ metadata() ->
                                             <<"range_end">> => <<"10.255.255.255">>}]},
         <<"size">> => #{<<"csvgz">> => 760, <<"mmdb">> => 3524}
     }.
+
+download() ->
+    #{<<"dataset_id">> => <<"bogon_ip_v1">>, <<"format">> => <<"csvgz">>, <<"outcome">> => <<"ok">>,
+      <<"sample">> => false, <<"open">> => true, <<"bytes">> => 760, <<"http_status">> => 200,
+      <<"apikey_id">> => <<"key_1">>, <<"client_ip">> => <<"203.0.113.7">>, <<"user_agent">> => <<"ua">>,
+      <<"created">> => <<"2026-09-04T10:00:00.000Z">>}.
 
 client(Stub) ->
     internetdata:new(#{api_key => <<"k">>, http => internetdata_stub:http(Stub)}).

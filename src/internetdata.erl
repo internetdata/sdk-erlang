@@ -145,7 +145,7 @@ license_types() ->
 %% rather than from the family itself.
 -spec database_list(client()) -> {ok, [map()]} | {error, internetdata_error:error()}.
 database_list(Client) ->
-    case get_json(Client, <<"/api/v2/database/list">>, [], {<<"databases">>, list}) of
+    case get_json(Client, <<"/api/v2/database/list">>, [], {<<"databases">>, {list, database()}}) of
         {ok, Databases} -> {ok, internetdata_result:databases(Databases)};
         {error, Error} -> {error, Error}
     end.
@@ -160,7 +160,7 @@ database_list(Client) ->
 -spec database_metadata(client(), binary() | string()) ->
     {ok, map()} | {error, internetdata_error:error()}.
 database_metadata(Client, Id) ->
-    case get_json(Client, <<"/api/v2/database/metadata">>, [{<<"id">>, bin(Id)}], {whole, [<<"id">>]}) of
+    case get_json(Client, <<"/api/v2/database/metadata">>, [{<<"id">>, bin(Id)}], {whole, metadata()}) of
         {ok, Body} -> {ok, internetdata_result:metadata(Body)};
         {error, Error} -> {error, Error}
     end.
@@ -175,7 +175,7 @@ database_checksums(Client, Id, Format) ->
     case format_name(Format) of
         {ok, Name} ->
             Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name}],
-            case get_json(Client, <<"/api/v2/database/checksum">>, Query, {<<"checksums">>, map}) of
+            case get_json(Client, <<"/api/v2/database/checksum">>, Query, {<<"checksums">>, checksums()}) of
                 {ok, Checksums} -> {ok, internetdata_result:checksums(Checksums)};
                 {error, Error} -> {error, Error}
             end;
@@ -203,7 +203,7 @@ database_downloads(Client, Options) ->
     Path = <<"/api/v2/database/downloads">>,
     case check_timeout(Options) of
         ok ->
-            case get_json(bound(Client, Options), Path, Query, {<<"downloads">>, list}) of
+            case get_json(bound(Client, Options), Path, Query, {<<"downloads">>, {list, download()}}) of
                 {ok, Downloads} -> {ok, internetdata_result:downloads(Downloads)};
                 {error, Error} -> {error, Error}
             end;
@@ -496,6 +496,41 @@ message(Path, Reason) ->
 
 get_json(Client, Path, Query, Member) ->
     internetdata_http:get_json(Client, Path, Query, maps:get(retries, Client), Member).
+
+%% Each answer's shape, from the pinned spec's schemas: a member the spec
+%% requires and never sends as null is required, a nullable or optional one
+%% may be absent or null, and every one present has the spec's type. `standing',
+%% `license_type', `format' and `outcome' stay strings, open sets as the spec
+%% documents them, and a sample row is an object whatever its columns.
+database() ->
+    {object, [{<<"base">>, string, true}, {<<"name">>, string, true}, {<<"summary">>, string, true},
+              {<<"standing">>, string, true}, {<<"open">>, boolean, true},
+              {<<"license_type">>, string, false}, {<<"starts">>, string, false},
+              {<<"expires">>, string, false}, {<<"renews_at">>, string, false},
+              {<<"notice_due_at">>, string, false}, {<<"versions">>, {list, version()}, true}]}.
+
+version() ->
+    {object, [{<<"id">>, string, true}, {<<"version">>, integer, true}, {<<"summary">>, string, true},
+              {<<"formats">>, {list, string}, true}, {<<"sample_formats">>, {list, string}, false}]}.
+
+metadata() ->
+    Column = {object, [{<<"name">>, string, true}, {<<"type">>, string, true},
+                       {<<"description">>, string, false}]},
+    {object, [{<<"id">>, string, true}, {<<"update_freq">>, string, false}, {<<"updated">>, string, true},
+              {<<"entries">>, integer, true}, {<<"schema">>, {map_of, {list, Column}}, true},
+              {<<"sample">>, {map_of, {list, object}}, false}, {<<"size">>, {map_of, integer}, true},
+              {<<"sample_size">>, {map_of, integer}, false}, {<<"sample_entries">>, integer, false}]}.
+
+checksums() ->
+    {object, [{<<"md5">>, string, true}, {<<"sha1">>, string, true}, {<<"sha256">>, string, true},
+              {<<"sha512">>, string, true}]}.
+
+download() ->
+    {object, [{<<"dataset_id">>, string, true}, {<<"format">>, string, true}, {<<"outcome">>, string, true},
+              {<<"sample">>, boolean, true}, {<<"open">>, boolean, true}, {<<"bytes">>, integer, false},
+              {<<"http_status">>, integer, false}, {<<"apikey_id">>, string, false},
+              {<<"client_ip">>, string, false}, {<<"user_agent">>, string, false},
+              {<<"created">>, string, true}]}.
 
 %% The client with this call's `timeout_ms' in place of its own, which is the one
 %% the transport reads for every request it builds.

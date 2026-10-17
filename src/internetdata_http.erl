@@ -42,9 +42,19 @@
 
 -type http_fun() :: fun((request()) -> response()).
 
-%% The one member of an answer a call returns, and the type it must have; or,
-%% for an answer that is the whole object, the members it may not go without.
--type member() :: {binary(), map | list} | {whole, [binary()]}.
+%% The one member of an answer a call returns and the shape it must have, or
+%% the shape of an answer that is the whole object.
+-type member() :: {binary(), shape()} | {whole, shape()}.
+
+%% What a JSON value must be, at every depth. An object lists its members as
+%% {wire name, shape, required}: a required one must be present and not null,
+%% while an optional one may be absent or null, and either is checked when it
+%% is there. A member the spec marks nullable is optional here, which is how a
+%% null `bytes' on a refused download stays an answer.
+-type shape() :: string | integer | boolean | object
+               | {list, shape()} | {map_of, shape()} | {object, [{binary(), shape(), boolean()}]}.
+
+-export_type([shape/0]).
 
 %% Requests go through a profile of our own rather than httpc's default one, so
 %% an application that retunes the default profile (a proxy, a different
@@ -77,8 +87,10 @@ get_json(Client, Path, Query, Retries) ->
     with_retry(Client, api_request(Client, Path, Query), Retries, fun(Result) -> answer(Result, none) end).
 
 %% @doc {@link get_json/4}, answering the one member of the object a call
-%% returns. An object without it, or with it of another type, or a list of it
-%% holding anything but objects, is no answer at all.
+%% returns, or the whole object. An answer without a member it requires, or
+%% with any member of another type than the spec's at any depth, is no answer
+%% at all: a version served as `"3"' is the server's fault, never a string
+%% handed back where the spec promises an integer.
 -spec get_json(map(), binary(), [{binary(), binary()}], non_neg_integer(), member()) ->
     {ok, map() | [map()]} | {error, internetdata_error:error()}.
 get_json(Client, Path, Query, Retries, Member) ->
@@ -99,23 +111,65 @@ answer(Result, _Member) ->
 
 read(Object, none) when is_map(Object) ->
     {ok, Object};
-read(Object, {whole, Required}) when is_map(Object) ->
-    case [Key || Key <- Required, maps:get(Key, Object, null) =:= null] of
-        [] -> {ok, Object};
-        [Key | _] -> {error, <<"the API answered with no ", Key/binary>>}
+read(Object, {whole, Shape}) when is_map(Object) ->
+    case conforms(Shape, Object, []) of
+        ok -> {ok, Object};
+        {error, Message} -> {error, Message}
     end;
-read(Object, {Key, Type}) when is_map(Object) ->
-    case maps:find(Key, Object) of
-        {ok, Value} when Type =:= map, is_map(Value) -> {ok, Value};
-        {ok, Value} when Type =:= list, is_list(Value) ->
-            case lists:all(fun erlang:is_map/1, Value) of
-                true -> {ok, Value};
-                false -> {error, <<"the API answered ", Key/binary, " holding something not an object">>}
-            end;
-        _ -> {error, <<"the API answered with no ", Key/binary>>}
+read(Object, {Key, Shape}) when is_map(Object) ->
+    case maps:get(Key, Object, null) of
+        null ->
+            {error, <<"the API answered with no ", Key/binary>>};
+        Value ->
+            case conforms(Shape, Value, [Key]) of
+                ok -> {ok, Value};
+                {error, Message} -> {error, Message}
+            end
     end;
 read(_Decoded, _Member) ->
     {error, <<"the API did not answer with a JSON object">>}.
+
+%% ok, or an error naming the first member, by its path, that is not what the
+%% shape says.
+conforms(string, Value, _At) when is_binary(Value) -> ok;
+conforms(integer, Value, _At) when is_integer(Value) -> ok;
+conforms(boolean, Value, _At) when is_boolean(Value) -> ok;
+conforms(object, Value, _At) when is_map(Value) -> ok;
+conforms({list, Shape}, Value, At) when is_list(Value) ->
+    each(Shape, lists:zip(lists:seq(0, length(Value) - 1), Value), At);
+conforms({map_of, Shape}, Value, At) when is_map(Value) ->
+    each(Shape, lists:sort(maps:to_list(Value)), At);
+conforms({object, Members}, Value, At) when is_map(Value) ->
+    members(Members, Value, At);
+conforms(_Shape, _Value, At) ->
+    {error, <<"the API answered ", (path(At))/binary, " of the wrong type">>}.
+
+each(_Shape, [], _At) ->
+    ok;
+each(Shape, [{Key, Value} | Rest], At) ->
+    case conforms(Shape, Value, [Key | At]) of
+        ok -> each(Shape, Rest, At);
+        Error -> Error
+    end.
+
+members([], _Object, _At) ->
+    ok;
+members([{Key, Shape, Required} | Rest], Object, At) ->
+    case {maps:get(Key, Object, null), Required} of
+        {null, true} -> {error, <<"the API answered with no ", (path([Key | At]))/binary>>};
+        {null, false} -> members(Rest, Object, At);
+        {Value, _} ->
+            case conforms(Shape, Value, [Key | At]) of
+                ok -> members(Rest, Object, At);
+                Error -> Error
+            end
+    end.
+
+path([]) -> <<"the answer">>;
+path(At) -> iolist_to_binary(lists:join(<<".">>, [segment(S) || S <- lists:reverse(At)])).
+
+segment(Index) when is_integer(Index) -> integer_to_binary(Index);
+segment(Key) -> Key.
 
 unreadable(Status, Message) ->
     #{kind => server_error, retryable => true, status => Status, message => Message}.
