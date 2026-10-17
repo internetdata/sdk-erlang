@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.10.0 - 2026-10-17
+
+### Features
+
+- Re-pin the spec to 2026.10.16: dynamic client registration ([`ee0654a`](https://github.com/internetdata/sdk-erlang/commit/ee0654afbefb82dfcf16d334f2ca28f4728a1293))
+
 ## 1.9.5 - 2026-10-16
 
 ### Fixes
