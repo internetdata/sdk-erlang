@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.10.1 - 2026-10-17
+
+### Fixes
+
+- Refuse a database answer whose member has the wrong type ([`6ddf406`](https://github.com/internetdata/sdk-erlang/commit/6ddf406ec9e0cde0a263af2e67f458c78acc1464))
+
 ## 1.10.0 - 2026-10-17
 
 ### Features
