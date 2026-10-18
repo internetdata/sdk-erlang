@@ -177,13 +177,12 @@ Check that `state` came back as you sent it before you exchange `code`, which wo
 
 ### Register a client
 
-An app with no client ID, and no client metadata document to use as one, registers itself and signs in with the `client_id` it gets back:
+An app with no client ID, and no client metadata document to use as one, registers itself, then signs in with the `client_id` it gets back as the client ID for `oauth_authorization_url` and `oauth_exchange_authorization_code`:
 
 ```erlang
 Client = internetdata:new(),
 {ok, Registration} = internetdata:oauth_register(Client, [<<"http://127.0.0.1:8765/callback">>],
                                                  #{client_name => <<"Your App">>}),
-%% maps:get(client_id, Registration) is the client ID for the authorization code calls.
 ```
 
 Each redirect URI must be https on a public host name, or http on a loopback address, which then matches any port. Nothing is kept until a person approves the client, so an app with no client ID saved can simply register again.
