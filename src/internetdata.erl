@@ -43,7 +43,7 @@
 }.
 
 -type options() :: #{
-    api_key => binary() | string(),
+    api_key => binary() | string() | false | nil,
     base_url => binary() | string(),
     retries => non_neg_integer(),
     timeout_ms => pos_integer() | infinity,
@@ -83,7 +83,9 @@ new() ->
 %% `timeout_ms' is milliseconds from 1 to 4294967295, or `infinity' for no bound,
 %% and `retries' an integer of 0 or more; anything else raises `badarg' here
 %% rather than failing every call. The key is trimmed, and one of blanks alone is
-%% no key; one holding a control character raises
+%% no key, as are `false', which is what `os:getenv/1' answers for a variable
+%% that is not set, and `nil', Elixir's `System.get_env/1' answer for one. One
+%% holding a control character raises
 %% `{badarg, {api_key, control_character}}', naming the cause and not the key.
 -spec new(options()) -> client().
 new(Options) ->
@@ -575,7 +577,7 @@ format_name(Format) ->
 %% takes.
 api_key(Options) ->
     case maps:get(api_key, Options, undefined) of
-        undefined ->
+        Absent when Absent =:= undefined; Absent =:= false; Absent =:= nil ->
             undefined;
         Key ->
             Trimmed = trim_blank(bin(Key)),

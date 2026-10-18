@@ -27,6 +27,19 @@ a_keyless_client_sends_no_authorization_header_test() ->
     ?assertEqual(3, internetdata_stub:calls(Stub)),
     internetdata_stub:stop(Stub).
 
+%% `false' is what `os:getenv/1' answers for an unset variable and `nil' what
+%% Elixir's `System.get_env/1' does, so each is no key rather than a crash.
+an_unset_environment_variable_is_no_key_test_() ->
+    [{atom_to_list(Value), fun() ->
+         Stub = internetdata_stub:start(#{?LIST_PATH => #{body => #{<<"databases">> => []}}}),
+         Client = internetdata:new(#{api_key => Value, http => internetdata_stub:http(Stub)}),
+         ?assertMatch(#{api_key := undefined}, Client),
+         ?assertEqual({ok, []}, internetdata:database_list(Client)),
+         [Headers] = internetdata_stub:headers_seen(Stub),
+         ?assertEqual(false, lists:keyfind(<<"authorization">>, 1, Headers)),
+         internetdata_stub:stop(Stub)
+     end} || Value <- [false, nil]].
+
 %% A blank key is what an unset secret interpolates to, and `Bearer' with a blank
 %% behind it reads as a wrong key rather than as none.
 a_blank_key_sends_no_authorization_header_test() ->
