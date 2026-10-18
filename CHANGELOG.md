@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.10.2 - 2026-10-18
+
+### Fixes
+
+- Take false and nil as no API key ([`604ff01`](https://github.com/internetdata/sdk-erlang/commit/604ff013b39dab2f8ac3623bbf187827f5d71d9d))
+
 ## 1.10.1 - 2026-10-17
 
 ### Fixes
