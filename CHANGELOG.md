@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.0 - 2026-10-18
+
+### Features
+
+- Add oauth_register, for RFC 7591 dynamic client registration ([`613d6d8`](https://github.com/internetdata/sdk-erlang/commit/613d6d843f85ea717983fe2d75e5c9d96d7352b1))
+
 ## 1.10.2 - 2026-10-18
 
 ### Fixes
