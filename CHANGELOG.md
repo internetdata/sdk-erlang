@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.1 - 2026-10-18
+
+### Fixes
+
+- Re-pin the spec to 2026.10.18: client_id_issued_at is int64 ([`60789c1`](https://github.com/internetdata/sdk-erlang/commit/60789c1db68185a8556d897e7a9f633e9133a171))
+
 ## 1.11.0 - 2026-10-18
 
 ### Features
