@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.2 - 2026-10-21
+
+### Fixes
+
+- Re-pin the spec to 2026.10.21: a 403 for a refused address ([`d282549`](https://github.com/internetdata/sdk-erlang/commit/d28254979e291b9bd69d8786a867ae78ee5eccb9))
+
 ## 1.11.1 - 2026-10-18
 
 ### Fixes
