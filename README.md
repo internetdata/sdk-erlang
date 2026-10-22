@@ -122,7 +122,7 @@ end.
 
 `kind` is one of `bad_request`, `unauthorized`, `forbidden`, `rate_limited`, `quota_exceeded`, `server_error`, `network` or `io`. `status` carries the HTTP status where there was one, and `message` is the API's own result code, so `NOT_LICENSED`, `LICENSE_EXPIRED` and `IP_NOT_ALLOWED` (a call from an address the key or its organization does not allow) tell you which 403 you got without having to ask us.
 
-Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are not the same thing. A rate limit is when the API faces extreme traffic bursts and so retrying later works; but a spent quota needs your allowance raised or the window to roll over. The library retries rate limits for you, but not if your quota is exceeded.
+`rate_limited` is a 429 that carries `Retry-After`, and the library retries it for you. `quota_exceeded` is a 429 without one, which it never retries. InternetData's database API has no quota, so you won't see `quota_exceeded` from it.
 
 ### Timeouts and retries
 
