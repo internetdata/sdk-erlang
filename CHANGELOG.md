@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.3 - 2026-10-29
+
+### Fixes
+
+- Refuse a date or date-time member that is not RFC 3339 ([`9e50fd4`](https://github.com/internetdata/sdk-erlang/commit/9e50fd44193117ac2143ccd3e868921330f17e8d))
+
 ## 1.11.2 - 2026-10-21
 
 ### Fixes
