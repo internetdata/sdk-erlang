@@ -240,6 +240,56 @@ a_member_of_the_wrong_type_at_any_depth_is_a_retried_server_error_test_() ->
           fun() -> assert_unreadable(Path, Body, maps:get(Path, Calls)) end}
      end || {Path, Wire} <- Cases].
 
+%% RFC 3339 alone, on a day that exists. Through 1.11.2 a date was checked as a
+%% binary alone, so every one of these came back as served (measured 2026-10-29).
+a_date_that_is_not_rfc_3339_is_a_retried_server_error_test_() ->
+    DateTimes = [<<"2026-10-05">>, <<"2026-10-05T10:00:00">>, <<"2026-10-05T10:00:00+05">>,
+                 <<"2026-10-05T10:00Z">>, <<"2026-10-05T10:00:00+0500">>, <<"2026-10-05T10:00:00+05:00:30">>,
+                 <<"2026-10-05T24:00:00Z">>, <<"2026-10-05T10:60:00Z">>, <<"2026-10-05T10:00:60Z">>,
+                 <<"2026-02-30T10:00:00Z">>, <<"2026-10-05T10:00:00+24:00">>, <<"2026-10-05T10:00:00+05:60">>,
+                 <<" 2026-10-05T10:00:00Z">>, <<"2026-10-05T10:00:00Z ">>, <<"2026-10-05 10:00:00Z">>,
+                 <<"2026-10-5T10:00:00Z">>, <<"+12026-10-05T10:00:00Z">>, <<"2026-10-05T10:00:00.Z">>,
+                 <<"20261005T100000Z">>, <<"2026-10-05T10:00:00UTC">>, <<"x">>, <<"tomorrow">>, <<"monday">>,
+                 <<>>, <<"2026-10-05T10:00:00Z\n">>, <<16#D9, 16#A2, "026-10-05T10:00:00Z">>],
+    Dates = [<<"2026-10-05T10:00:00">>, <<"2026-10-05T10:00:00Z">>, <<"2026-02-30">>, <<"2026-11-31">>,
+             <<"2026-13-01">>, <<"2026-10-5">>, <<"20261005">>, <<"2026-W41-1">>, <<"2026-278">>,
+             <<" 2026-10-05">>, <<"+12026-10-05">>, <<"x">>, <<"tomorrow">>, <<"monday">>, <<>>,
+             <<"2026-10-05\n">>, <<16#D9, 16#A2, "026-10-05">>, <<"2025-02-29">>, <<"1900-02-29">>],
+    Listing = fun(Member, Value) -> #{<<"databases">> => [(family())#{Member => Value}]} end,
+    Cases = [{?LIST_PATH, Listing(Member, Value)}
+             || Value <- DateTimes, Member <- [<<"starts">>, <<"expires">>, <<"renews_at">>, <<"notice_due_at">>]]
+        ++ [{?DOWNLOADS_PATH, #{<<"downloads">> => [(download())#{<<"created">> => Value}]}} || Value <- DateTimes]
+        ++ [{?METADATA_PATH, (metadata())#{<<"updated">> => Value}} || Value <- Dates],
+    Calls = #{?LIST_PATH => fun internetdata:database_list/1,
+              ?METADATA_PATH => fun(C) -> internetdata:database_metadata(C, <<"bogon_ip_v1">>) end,
+              ?DOWNLOADS_PATH => fun internetdata:database_downloads/1},
+    [begin
+         Body = iolist_to_binary(json:encode(Wire)),
+         {binary_to_list(<<Path/binary, " ", Body/binary>>),
+          fun() -> assert_unreadable(Path, Body, maps:get(Path, Calls)) end}
+     end || {Path, Wire} <- Cases].
+
+%% Every spelling RFC 3339 allows stays an answer, lowercase `t' and `z' included.
+a_date_in_any_rfc_3339_spelling_stays_an_answer_test() ->
+    DateTimes = [<<"2026-10-05T10:00:00Z">>, <<"2026-10-05t10:00:00.5z">>, <<"2026-10-05T10:00:00-00:00">>,
+                 <<"2026-10-05T10:00:00.123456789+05:30">>, <<"2024-02-29T23:59:59+23:59">>,
+                 <<"0001-01-01T00:00:00Z">>, <<"2000-02-29T00:00:00Z">>],
+    Dates = [<<"2026-10-05">>, <<"2024-02-29">>, <<"0099-12-31">>, <<"2000-02-29">>],
+    lists:foreach(fun(Value) ->
+        Stub = internetdata_stub:start(#{
+            ?LIST_PATH => #{body => #{<<"databases">> => [(family())#{<<"starts">> => Value}]}},
+            ?DOWNLOADS_PATH => #{body => #{<<"downloads">> => [(download())#{<<"created">> => Value}]}}}),
+        Client = client(Stub),
+        ?assertMatch({ok, [#{starts := Value}]}, internetdata:database_list(Client)),
+        ?assertMatch({ok, [#{created := Value}]}, internetdata:database_downloads(Client)),
+        internetdata_stub:stop(Stub)
+    end, DateTimes),
+    lists:foreach(fun(Value) ->
+        Stub = internetdata_stub:start(#{?METADATA_PATH => #{body => (metadata())#{<<"updated">> => Value}}}),
+        ?assertMatch({ok, #{updated := Value}}, internetdata:database_metadata(client(Stub), <<"bogon_ip_v1">>)),
+        internetdata_stub:stop(Stub)
+    end, Dates).
+
 %% The nullable members stay answers when null, and the optional ones when
 %% absent: refusing those would fail every refused download and every family
 %% with no license.

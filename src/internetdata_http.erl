@@ -50,8 +50,10 @@
 %% {wire name, shape, required}: a required one must be present and not null,
 %% while an optional one may be absent or null, and either is checked when it
 %% is there. A member the spec marks nullable is optional here, which is how a
-%% null `bytes' on a refused download stays an answer.
--type shape() :: string | integer | boolean | object
+%% null `bytes' on a refused download stays an answer. `date' is RFC 3339's
+%% full-date and `date_time' its date-time with a zone, each on a day and at a
+%% time that exist.
+-type shape() :: string | integer | boolean | object | date | date_time
                | {list, shape()} | {map_of, shape()} | {object, [{binary(), shape(), boolean()}]}.
 
 -export_type([shape/0]).
@@ -135,6 +137,10 @@ conforms(string, Value, _At) when is_binary(Value) -> ok;
 conforms(integer, Value, _At) when is_integer(Value) -> ok;
 conforms(boolean, Value, _At) when is_boolean(Value) -> ok;
 conforms(object, Value, _At) when is_map(Value) -> ok;
+conforms(date, Value, At) when is_binary(Value) ->
+    dated(is_date(Value), At);
+conforms(date_time, Value, At) when is_binary(Value) ->
+    dated(is_date_time(Value), At);
 conforms({list, Shape}, Value, At) when is_list(Value) ->
     each(Shape, lists:zip(lists:seq(0, length(Value) - 1), Value), At);
 conforms({map_of, Shape}, Value, At) when is_map(Value) ->
@@ -143,6 +149,9 @@ conforms({object, Members}, Value, At) when is_map(Value) ->
     members(Members, Value, At);
 conforms(_Shape, _Value, At) ->
     {error, <<"the API answered ", (path(At))/binary, " of the wrong type">>}.
+
+dated(true, _At) -> ok;
+dated(false, At) -> {error, <<"the API answered ", (path(At))/binary, " that is not a date in the spec's form">>}.
 
 each(_Shape, [], _At) ->
     ok;
@@ -170,6 +179,50 @@ path(At) -> iolist_to_binary(lists:join(<<".">>, [segment(S) || S <- lists:rever
 
 segment(Index) when is_integer(Index) -> integer_to_binary(Index);
 segment(Key) -> Key.
+
+%% `YYYY-MM-DD', on a day that exists.
+is_date(<<Y:4/binary, $-, M:2/binary, $-, D:2/binary>>) ->
+    case {digits(Y), digits(M), digits(D)} of
+        {{ok, Year}, {ok, Month}, {ok, Day}} -> calendar:valid_date(Year, Month, Day);
+        _ -> false
+    end;
+is_date(_) ->
+    false.
+
+%% `YYYY-MM-DDTHH:MM:SS', an optional fraction, then `Z' or `+HH:MM'/`-HH:MM',
+%% at a time that exists: no hour 24, no minute or second 60, in the time and in
+%% the zone alike. RFC 3339 allows `t' and `z' in lowercase, so both cases are
+%% read.
+is_date_time(<<Date:10/binary, T, H:2/binary, $:, Mi:2/binary, $:, S:2/binary, Rest/binary>>)
+  when T =:= $T; T =:= $t ->
+    is_date(Date) andalso clock(H, 23) andalso clock(Mi, 59) andalso clock(S, 59)
+        andalso zone(fraction(Rest));
+is_date_time(_) ->
+    false.
+
+fraction(<<$., Rest/binary>>) ->
+    case string:span(binary_to_list(Rest), "0123456789") of
+        0 -> invalid;
+        N -> binary:part(Rest, N, byte_size(Rest) - N)
+    end;
+fraction(Rest) ->
+    Rest.
+
+zone(<<Z>>) when Z =:= $Z; Z =:= $z -> true;
+zone(<<Sign, H:2/binary, $:, M:2/binary>>) when Sign =:= $+; Sign =:= $- -> clock(H, 23) andalso clock(M, 59);
+zone(_) -> false.
+
+clock(Digits, Max) ->
+    case digits(Digits) of
+        {ok, N} -> N =< Max;
+        error -> false
+    end.
+
+digits(Bin) ->
+    case Bin =/= <<>> andalso lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Bin)) of
+        true -> {ok, binary_to_integer(Bin)};
+        false -> error
+    end.
 
 unreadable(Status, Message) ->
     #{kind => server_error, retryable => true, status => Status, message => Message}.

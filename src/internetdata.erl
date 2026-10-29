@@ -529,15 +529,16 @@ get_json(Client, Path, Query, Member) ->
 
 %% Each answer's shape, from the pinned spec's schemas: a member the spec
 %% requires and never sends as null is required, a nullable or optional one
-%% may be absent or null, and every one present has the spec's type. `standing',
+%% may be absent or null, and every one present has the spec's type, a date
+%% RFC 3339's form as its `format' names, on a day that exists. `standing',
 %% `license_type', `format' and `outcome' stay strings, open sets as the spec
 %% documents them, and a sample row is an object whatever its columns.
 database() ->
     {object, [{<<"base">>, string, true}, {<<"name">>, string, true}, {<<"summary">>, string, true},
               {<<"standing">>, string, true}, {<<"open">>, boolean, true},
-              {<<"license_type">>, string, false}, {<<"starts">>, string, false},
-              {<<"expires">>, string, false}, {<<"renews_at">>, string, false},
-              {<<"notice_due_at">>, string, false}, {<<"versions">>, {list, version()}, true}]}.
+              {<<"license_type">>, string, false}, {<<"starts">>, date_time, false},
+              {<<"expires">>, date_time, false}, {<<"renews_at">>, date_time, false},
+              {<<"notice_due_at">>, date_time, false}, {<<"versions">>, {list, version()}, true}]}.
 
 version() ->
     {object, [{<<"id">>, string, true}, {<<"version">>, integer, true}, {<<"summary">>, string, true},
@@ -546,7 +547,7 @@ version() ->
 metadata() ->
     Column = {object, [{<<"name">>, string, true}, {<<"type">>, string, true},
                        {<<"description">>, string, false}]},
-    {object, [{<<"id">>, string, true}, {<<"update_freq">>, string, false}, {<<"updated">>, string, true},
+    {object, [{<<"id">>, string, true}, {<<"update_freq">>, string, false}, {<<"updated">>, date, true},
               {<<"entries">>, integer, true}, {<<"schema">>, {map_of, {list, Column}}, true},
               {<<"sample">>, {map_of, {list, object}}, false}, {<<"size">>, {map_of, integer}, true},
               {<<"sample_size">>, {map_of, integer}, false}, {<<"sample_entries">>, integer, false}]}.
@@ -560,7 +561,7 @@ download() ->
               {<<"sample">>, boolean, true}, {<<"open">>, boolean, true}, {<<"bytes">>, integer, false},
               {<<"http_status">>, integer, false}, {<<"apikey_id">>, string, false},
               {<<"client_ip">>, string, false}, {<<"user_agent">>, string, false},
-              {<<"created">>, string, true}]}.
+              {<<"created">>, date_time, true}]}.
 
 %% The client with this call's `timeout_ms' in place of its own, which is the one
 %% the transport reads for every request it builds.
