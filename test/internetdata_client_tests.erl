@@ -201,13 +201,15 @@ a_2xx_the_call_cannot_read_is_a_retried_server_error_test_() ->
 
 %% A member of another type than the spec's, at any depth, is no answer either:
 %% a version served as "3" was handed back as the binary, and an entry
-%% without the members the spec requires as an empty map (1.10.0).
+%% without the members the spec requires as an empty map (1.10.0), and a
+%% checksum answer without its `id' or `format' as its digests (1.11.3).
 a_member_of_the_wrong_type_at_any_depth_is_a_retried_server_error_test_() ->
     Family = family(),
     [Version] = maps:get(<<"versions">>, Family),
     Listing = fun(F) -> #{<<"databases">> => [F]} end,
     Attempt = download(),
     Sums = #{<<"md5">> => <<"m">>, <<"sha1">> => <<"s1">>, <<"sha256">> => <<"s256">>, <<"sha512">> => <<"s512">>},
+    Answer = #{<<"id">> => <<"bogon_ip_v1">>, <<"format">> => <<"mmdb">>, <<"checksums">> => Sums},
     Cases = [
         {?LIST_PATH, Listing(Family#{<<"versions">> => [Version#{<<"version">> => <<"3">>}]})},
         {?LIST_PATH, Listing(Family#{<<"versions">> => [Version#{<<"version">> => <<"x">>}]})},
@@ -224,8 +226,14 @@ a_member_of_the_wrong_type_at_any_depth_is_a_retried_server_error_test_() ->
         {?METADATA_PATH, (metadata())#{<<"schema">> => #{<<"csvgz">> => [#{<<"name">> => 1, <<"type">> => <<"t">>}]}}},
         {?METADATA_PATH, (metadata())#{<<"sample">> => #{<<"csvgz">> => [1]}}},
         {?METADATA_PATH, maps:remove(<<"updated">>, metadata())},
-        {?CHECKSUM_PATH, #{<<"checksums">> => Sums#{<<"sha256">> => 1}}},
-        {?CHECKSUM_PATH, #{<<"checksums">> => maps:remove(<<"sha512">>, Sums)}},
+        {?CHECKSUM_PATH, Answer#{<<"checksums">> => Sums#{<<"sha256">> => 1}}},
+        {?CHECKSUM_PATH, Answer#{<<"checksums">> => maps:remove(<<"sha512">>, Sums)}},
+        {?CHECKSUM_PATH, maps:remove(<<"id">>, Answer)},
+        {?CHECKSUM_PATH, maps:remove(<<"format">>, Answer)},
+        {?CHECKSUM_PATH, Answer#{<<"id">> => null}},
+        {?CHECKSUM_PATH, Answer#{<<"format">> => null}},
+        {?CHECKSUM_PATH, Answer#{<<"id">> => 1}},
+        {?CHECKSUM_PATH, Answer#{<<"format">> => 1}},
         {?DOWNLOADS_PATH, #{<<"downloads">> => [Attempt#{<<"bytes">> => <<"10">>}]}},
         {?DOWNLOADS_PATH, #{<<"downloads">> => [Attempt#{<<"open">> => <<"true">>}]}},
         {?DOWNLOADS_PATH, #{<<"downloads">> => [Attempt#{<<"created">> => null}]}}

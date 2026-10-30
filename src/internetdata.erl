@@ -181,8 +181,8 @@ database_checksums(Client, Id, Format) ->
     case format_name(Format) of
         {ok, Name} ->
             Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name}],
-            case get_json(Client, <<"/api/v2/database/checksum">>, Query, {<<"checksums">>, checksums()}) of
-                {ok, Checksums} -> {ok, internetdata_result:checksums(Checksums)};
+            case get_json(Client, <<"/api/v2/database/checksum">>, Query, {whole, checksum()}) of
+                {ok, Answer} -> {ok, internetdata_result:checksums(maps:get(<<"checksums">>, Answer))};
                 {error, Error} -> {error, Error}
             end;
         {error, Error} ->
@@ -551,6 +551,11 @@ metadata() ->
               {<<"entries">>, integer, true}, {<<"schema">>, {map_of, {list, Column}}, true},
               {<<"sample">>, {map_of, {list, object}}, false}, {<<"size">>, {map_of, integer}, true},
               {<<"sample_size">>, {map_of, integer}, false}, {<<"sample_entries">>, integer, false}]}.
+
+%% The answer's `id' and `format' are required though only its digests are
+%% handed back: through 1.11.3 an answer without either came back as one.
+checksum() ->
+    {object, [{<<"id">>, string, true}, {<<"format">>, string, true}, {<<"checksums">>, checksums(), true}]}.
 
 checksums() ->
     {object, [{<<"md5">>, string, true}, {<<"sha1">>, string, true}, {<<"sha256">>, string, true},
