@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.4 - 2026-10-30
+
+### Fixes
+
+- Refuse a checksum answer without its id or format ([`8505274`](https://github.com/internetdata/sdk-erlang/commit/85052742eb233cb4931aee1b8998367d279dd35c))
+
 ## 1.11.3 - 2026-10-29
 
 ### Fixes
