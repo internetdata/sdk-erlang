@@ -2,7 +2,7 @@
 %% so "one request, not three" is asserted rather than assumed.
 %%
 %% Routes are keyed by request PATH, with or without its leading slash. A path
-%% with no route answers 404, which is what the API does for a dataset id it does
+%% with no route answers 404, which is what the API does for a dataset ID it does
 %% not publish.
 -module(internetdata_stub).
 

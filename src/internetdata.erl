@@ -147,7 +147,7 @@ license_types() ->
 %% `standing' and `license_type' report like any other.
 %%
 %% A license covers a family (`base'), while a download names one of its
-%% versions, so the ids the other calls take come from a family's `versions'
+%% versions, so the IDs the other calls take come from a family's `versions'
 %% rather than from the family itself.
 -spec database_list(client()) -> {ok, [map()]} | {error, internetdata_error:error()}.
 database_list(Client) ->

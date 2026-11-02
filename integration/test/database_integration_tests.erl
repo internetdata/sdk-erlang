@@ -2,7 +2,7 @@
 %%
 %% Nothing here NAMES a database. The listing supplies both targets - the
 %% smallest licensed artifact to transfer, and an unlicensed one to be refused -
-%% because a written-in id goes stale the day a license changes, and deriving
+%% because a written-in ID goes stale the day a license changes, and deriving
 %% them exercises `standing' as a side effect.
 %%
 %% Every transfer is budgeted before it starts. Metadata publishes a size per
@@ -52,7 +52,7 @@ assert_family(Family) ->
     [begin
          ?assert(is_binary(maps:get(id, V, missing))),
          ?assert(is_integer(maps:get(version, V, missing))),
-         %% The id and the formats live on the VERSION. A family carrying them
+         %% The ID and the formats live on the VERSION. A family carrying them
          %% itself would leave `database_list/1' unable to tell a caller what to
          %% download at all.
          ?assertNotEqual({Base, []}, {Base, maps:get(formats, V, [])})
@@ -132,7 +132,7 @@ no_credential_is_sent_to_object_storage_test_() ->
     end).
 
 %% Every attempt lands in the history, so the transfer this suite just made is
-%% there to find. Matched by dataset id rather than by position: another run
+%% there to find. Matched by dataset ID rather than by position: another run
 %% against the same organization is free to be interleaved with this one.
 the_history_records_the_transfer_that_just_happened_test_() ->
     transferred(fun(#{id := Id}) ->

@@ -452,7 +452,7 @@ a_per_call_timeout_out_of_range_is_refused_before_any_request_test() ->
     ?assertEqual(0, internetdata_stub:calls(Stub)),
     internetdata_stub:stop(Stub).
 
-%% A dataset id is caller input. Percent-encoded, it cannot escape the parameter
+%% A dataset ID is caller input. Percent-encoded, it cannot escape the parameter
 %% it was put in; unencoded, `x&id=y' would ask for a different dataset entirely.
 a_dataset_id_cannot_rewrite_the_request_test() ->
     ?assertEqual(<<"bogon%2Fip%3Fx%3D1%26id%3Dother">>,
