@@ -2,6 +2,13 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.5 - 2026-11-03
+
+### Fixes
+
+- Re-pin the spec to 2026.11.02: ID and IDs in its descriptions ([`3192b48`](https://github.com/internetdata/sdk-erlang/commit/3192b4879adf63fb661e9a6f85db18958bdfa5c4))
+- Write ID and IDs in prose, never id or ids ([`f739791`](https://github.com/internetdata/sdk-erlang/commit/f739791a281520a595c1e37a531d6ec0e754738b))
+
 ## 1.11.4 - 2026-10-30
 
 ### Fixes
