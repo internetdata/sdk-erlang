@@ -507,7 +507,7 @@ form(Pairs) ->
     iolist_to_binary(lists:join(<<"&">>, Encoded)).
 
 %% Percent-encodes everything outside the unreserved set, so a stray `/', `?' or
-%% `&' in a caller-supplied dataset id cannot rewrite the path or smuggle in a
+%% `&' in a caller-supplied dataset ID cannot rewrite the path or smuggle in a
 %% second parameter.
 escape(Value) when is_binary(Value) ->
     <<<<(escape_byte(B))/binary>> || <<B>> <= Value>>.
