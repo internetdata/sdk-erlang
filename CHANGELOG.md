@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.11.6 - 2026-11-06
+
+### Fixes
+
+- Re-pin the spec to 2026.11.05: the download's build parameter ([`a99cb55`](https://github.com/internetdata/sdk-erlang/commit/a99cb5594e20e4292bbef8af1d7e702e9837271f))
+
 ## 1.11.5 - 2026-11-03
 
 ### Fixes
