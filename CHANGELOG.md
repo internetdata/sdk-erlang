@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.12.0 - 2026-11-07
+
+### Features
+
+- Download a named build: database_download_url/4, database_download/5 and database_download_bytes/4 take build ([`564c7ce`](https://github.com/internetdata/sdk-erlang/commit/564c7ce63a0edc88d384fe633c39d5b0696e3f30))
+
 ## 1.11.6 - 2026-11-06
 
 ### Fixes
