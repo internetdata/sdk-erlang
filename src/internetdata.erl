@@ -14,7 +14,8 @@
 -export([new/0, new/1]).
 -export([database_list/1, database_metadata/2, database_checksums/3,
          database_downloads/1, database_downloads/2, database_download_url/3,
-         database_download/4, database_download_bytes/3]).
+         database_download_url/4, database_download/4, database_download/5,
+         database_download_bytes/3, database_download_bytes/4]).
 -export([database_formats/0, standings/0, license_types/0]).
 -export([oauth_metadata/1, oauth_metadata/2, oauth_device_authorization/2,
          oauth_device_authorization/3, oauth_exchange_device_code/3, oauth_exchange_device_code/4,
@@ -24,7 +25,8 @@
          oauth_exchange_authorization_code/6, oauth_create_pkce/0, oauth_pkce_challenge/1]).
 -export([oauth_register/2, oauth_register/3]).
 
--export_type([client/0, options/0, downloads_options/0, format/0]).
+-export_type([client/0, options/0, downloads_options/0, download_url_options/0,
+              download_options/0, format/0]).
 -export_type([oauth_options/0, device_authorization_options/0, authorization_url_options/0,
               register_options/0]).
 
@@ -53,6 +55,10 @@
 }.
 
 -type downloads_options() :: #{limit => pos_integer(), timeout_ms => pos_integer() | infinity}.
+%% `build' names one build of a database, as a `database.updated' webhook gives
+%% it; absent or empty, a download fetches the build that is live.
+-type download_url_options() :: #{build => binary() | string(), timeout_ms => pos_integer() | infinity}.
+-type download_options() :: #{build => binary() | string()}.
 -type format() :: csvgz | mmdb.
 %% The same set at runtime, because `format()' checks nothing once compiled.
 -define(FORMATS, [csvgz, mmdb]).
@@ -226,12 +232,27 @@ database_downloads(Client, Options) ->
 -spec database_download_url(client(), binary() | string(), format()) ->
     {ok, binary()} | {error, internetdata_error:error()}.
 database_download_url(Client, Id, Format) ->
-    case format_name(Format) of
-        {ok, Name} ->
-            Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name}],
-            internetdata_http:get_redirect(Client, <<"/api/v2/database/download">>, Query,
-                                           maps:get(retries, Client));
-        {error, Error} ->
+    database_download_url(Client, Id, Format, #{}).
+
+%% @doc {@link database_download_url/3} for the build `build' in `Options' names,
+%% as a `database.updated' webhook gives it (`<<"20261105.0t53s5">>'), so the file
+%% is the one whose `sha256' the webhook carries. Absent or empty, the build that
+%% is live. A build is kept 7 days; past that the call answers `bad_request' with
+%% the message `<<"BUILD_GONE">>'. `timeout_ms' bounds each attempt of this call
+%% alone.
+-spec database_download_url(client(), binary() | string(), format(), download_url_options()) ->
+    {ok, binary()} | {error, internetdata_error:error()}.
+database_download_url(Client, Id, Format, Options) ->
+    case {format_name(Format), build_query(Options), check_timeout(Options)} of
+        {{ok, Name}, {ok, Build}, ok} ->
+            Query = [{<<"id">>, bin(Id)}, {<<"format">>, Name} | Build],
+            internetdata_http:get_redirect(bound(Client, Options), <<"/api/v2/database/download">>,
+                                           Query, maps:get(retries, Client));
+        {{error, Error}, _, _} ->
+            {error, Error};
+        {_, {error, Error}, _} ->
+            {error, Error};
+        {_, _, {error, Error}} ->
             {error, Error}
     end.
 
@@ -249,11 +270,24 @@ database_download_url(Client, Id, Format) ->
 -spec database_download(client(), binary() | string(), format(), binary() | string()) ->
     {ok, non_neg_integer()} | {error, internetdata_error:error()}.
 database_download(Client, Id, Format, Path) ->
-    Dest = bin(Path),
-    Partial = <<Dest/binary, ".part">>,
-    case file:open(Partial, [write, binary, raw]) of
-        {ok, Fd} -> to_file(Client, Id, Format, Dest, Partial, Fd);
-        {error, Reason} -> {error, io_error(Partial, Reason)}
+    database_download(Client, Id, Format, Path, #{}).
+
+%% @doc {@link database_download/4} for the build `build' in `Options' names, as
+%% {@link database_download_url/4} takes it. A transfer takes no `timeout_ms'.
+-spec database_download(client(), binary() | string(), format(), binary() | string(),
+                        download_options()) ->
+    {ok, non_neg_integer()} | {error, internetdata_error:error()}.
+database_download(Client, Id, Format, Path, Options) ->
+    case check_transfer_options(Options) of
+        ok ->
+            Dest = bin(Path),
+            Partial = <<Dest/binary, ".part">>,
+            case file:open(Partial, [write, binary, raw]) of
+                {ok, Fd} -> to_file(Client, Id, Format, Options, Dest, Partial, Fd);
+                {error, Reason} -> {error, io_error(Partial, Reason)}
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 %% @doc Download one dataset file and hand back its bytes.
@@ -267,10 +301,23 @@ database_download(Client, Id, Format, Path) ->
 -spec database_download_bytes(client(), binary() | string(), format()) ->
     {ok, binary()} | {error, internetdata_error:error()}.
 database_download_bytes(Client, Id, Format) ->
+    database_download_bytes(Client, Id, Format, #{}).
+
+%% @doc {@link database_download_bytes/3} for the build `build' in `Options'
+%% names, as {@link database_download_url/4} takes it. A transfer takes no
+%% `timeout_ms'.
+-spec database_download_bytes(client(), binary() | string(), format(), download_options()) ->
+    {ok, binary()} | {error, internetdata_error:error()}.
+database_download_bytes(Client, Id, Format, Options) ->
     Sink = #{fold => fun(Chunk, Chunks) -> {ok, [Chunk | Chunks]} end, acc => []},
-    case transfer(Client, Id, Format, Sink) of
-        {ok, #{acc := Chunks}} -> {ok, iolist_to_binary(lists:reverse(Chunks))};
-        {error, Error} -> {error, Error}
+    case check_transfer_options(Options) of
+        ok ->
+            case transfer(Client, Id, Format, Options, Sink) of
+                {ok, #{acc := Chunks}} -> {ok, iolist_to_binary(lists:reverse(Chunks))};
+                {error, Error} -> {error, Error}
+            end;
+        {error, Error} ->
+            {error, Error}
     end.
 
 -spec oauth_metadata(client()) ->
@@ -474,14 +521,14 @@ oauth_create_pkce() ->
 oauth_pkce_challenge(Verifier) ->
     internetdata_oauth:pkce_challenge(bin(Verifier)).
 
-to_file(Client, Id, Format, Dest, Partial, Fd) ->
+to_file(Client, Id, Format, Options, Dest, Partial, Fd) ->
     Sink = #{acc => Fd, fold => fun(Chunk, Handle) ->
         case file:write(Handle, Chunk) of
             ok -> {ok, Handle};
             {error, Reason} -> {error, message(Partial, Reason)}
         end
     end},
-    Transferred = transfer(Client, Id, Format, Sink),
+    Transferred = transfer(Client, Id, Format, Options, Sink),
     Closed = file:close(Fd),
     case {Transferred, Closed} of
         {{ok, #{written := Written}}, ok} ->
@@ -499,8 +546,8 @@ to_file(Client, Id, Format, Dest, Partial, Fd) ->
 %% The 302 is followed as a SECOND request that carries no credential: the
 %% presigned link authorizes itself, and forwarding the API key would hand it to
 %% a host with no business holding it.
-transfer(Client, Id, Format, Sink) ->
-    case database_download_url(Client, Id, Format) of
+transfer(Client, Id, Format, Options, Sink) ->
+    case database_download_url(Client, Id, Format, Options) of
         {ok, Url} -> internetdata_http:get_stream(Client, Url, Sink, maps:get(retries, Client));
         {error, Error} -> {error, Error}
     end.
@@ -572,6 +619,31 @@ download() ->
 %% the transport reads for every request it builds.
 bound(Client, Options) ->
     Client#{timeout_ms := maps:get(timeout_ms, Options, maps:get(timeout_ms, Client))}.
+
+%% The `build' query parameter, none for an absent or empty one, so a value read
+%% from an unset setting downloads the live build.
+build_query(#{build := Build}) when is_binary(Build); is_list(Build) ->
+    case bin(Build) of
+        <<>> -> {ok, []};
+        Name -> {ok, [{<<"build">>, Name}]}
+    end;
+build_query(#{build := Build}) ->
+    Message = io_lib:format("build must be a build's name, a binary or a string, not ~p", [Build]),
+    {error, #{kind => bad_request, retryable => false, message => iolist_to_binary(Message)}};
+build_query(_Options) ->
+    {ok, []}.
+
+%% A transfer refuses a `timeout_ms' rather than spending it on the link call
+%% alone, where a caller would read it as bounding the transfer, which nothing
+%% does; and a bad `build' before a `.part' file is opened.
+check_transfer_options(#{timeout_ms := _}) ->
+    {error, #{kind => bad_request, retryable => false,
+              message => <<"a transfer takes no timeout_ms: it runs as long as the file does">>}};
+check_transfer_options(Options) ->
+    case build_query(Options) of
+        {ok, _} -> ok;
+        {error, Error} -> {error, Error}
+    end.
 
 %% Refused here rather than sent: httpc fails a call at once on zero, runs it with
 %% no bound on a value it ignores, and raises in the caller past ?MAX_TIMEOUT_MS.

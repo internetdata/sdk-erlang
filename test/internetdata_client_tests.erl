@@ -440,6 +440,62 @@ a_limit_is_only_sent_when_it_is_asked_for_test() ->
                  [path_and_query(Url) || Url <- requested([])]),
     internetdata_stub:stop(Stub).
 
+a_build_goes_on_the_download_request_and_none_without_one_test() ->
+    Stub = internetdata_stub:start(#{?DOWNLOAD_PATH => #{
+        status => 302, headers => #{<<"Location">> => <<"http://127.0.0.1:9/blob">>}}}),
+    Http = internetdata_stub:http(Stub),
+    Parent = self(),
+    Recording = fun(#{url := Url} = Request) ->
+        Parent ! {requested, Url},
+        Http(Request)
+    end,
+    Client = internetdata:new(#{api_key => <<"k">>, http => Recording, retries => 0}),
+    Named = <<"20261105.0t53s5">>,
+
+    {ok, _} = internetdata:database_download_url(Client, <<"bogon_ip_v1">>, csvgz, #{build => Named}),
+    {ok, _} = internetdata:database_download_url(Client, <<"bogon_ip_v1">>, csvgz,
+                                                 #{build => "20261105.0t53s5", timeout_ms => 5000}),
+    %% Object storage is unreachable here, so the transfer fails after the link.
+    {error, _} = internetdata:database_download_bytes(Client, <<"bogon_ip_v1">>, csvgz, #{build => Named}),
+    {ok, _} = internetdata:database_download_url(Client, <<"bogon_ip_v1">>, csvgz, #{build => <<>>}),
+    {ok, _} = internetdata:database_download_url(Client, <<"bogon_ip_v1">>, csvgz),
+
+    WithBuild = {?DOWNLOAD_PATH, [{<<"id">>, <<"bogon_ip_v1">>}, {<<"format">>, <<"csvgz">>},
+                                  {<<"build">>, Named}]},
+    Live = {?DOWNLOAD_PATH, [{<<"id">>, <<"bogon_ip_v1">>}, {<<"format">>, <<"csvgz">>}]},
+    ?assertEqual([WithBuild, WithBuild, WithBuild, Live, Live],
+                 [Asked || {Path, _} = Asked <- [path_and_query(Url) || Url <- requested([])],
+                           Path =:= ?DOWNLOAD_PATH]),
+    internetdata_stub:stop(Stub).
+
+a_bad_build_or_a_transfer_given_a_timeout_is_refused_before_any_request_test() ->
+    Stub = internetdata_stub:start(#{}),
+    Client = internetdata:new(#{api_key => <<"k">>, http => internetdata_stub:http(Stub)}),
+    Path = filename:join(os:getenv("TMPDIR", "/tmp"), "internetdata-refused.csv.gz"),
+
+    Refusals = [
+        internetdata:database_download_url(Client, <<"bogon_ip_v1">>, csvgz, #{build => 20261105}),
+        internetdata:database_download_bytes(Client, <<"bogon_ip_v1">>, csvgz, #{build => latest}),
+        internetdata:database_download_bytes(Client, <<"bogon_ip_v1">>, csvgz, #{timeout_ms => 5000}),
+        internetdata:database_download(Client, <<"bogon_ip_v1">>, csvgz, Path, #{timeout_ms => 5000})
+    ],
+
+    [?assertMatch({error, #{kind := bad_request, retryable := false}}, R) || R <- Refusals],
+    ?assertEqual(0, internetdata_stub:calls(Stub)),
+    ?assertNot(filelib:is_file(Path ++ ".part")),
+    internetdata_stub:stop(Stub).
+
+a_gone_build_is_a_bad_request_asked_once_test() ->
+    Stub = internetdata_stub:start(#{?DOWNLOAD_PATH => #{
+        status => 410, body => #{<<"rc">> => <<"BUILD_GONE">>}}}),
+    Client = internetdata:new(#{api_key => <<"k">>, http => internetdata_stub:http(Stub), retries => 2}),
+
+    ?assertMatch({error, #{kind := bad_request, retryable := false, message := <<"BUILD_GONE">>}},
+                 internetdata:database_download_url(Client, <<"bogon_ip_v1">>, csvgz,
+                                                    #{build => <<"20261029.aaaaaa">>})),
+    ?assertEqual(1, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
 %% A per-call bound httpc cannot wait on is refused as well, before it costs a
 %% request.
 a_per_call_timeout_out_of_range_is_refused_before_any_request_test() ->

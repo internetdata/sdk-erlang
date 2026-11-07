@@ -14,7 +14,7 @@ The library helps you browse the datasets your organization licenses and downloa
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.11"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.12"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
@@ -84,6 +84,15 @@ For a small database you can take the bytes directly. This holds the whole file 
 ```
 
 It authorizes the START of a transfer, so one already running is not interrupted when the link lapses.
+
+Each of the three downloads the build that is live unless you name one, through the arity that takes options. A `database.updated` webhook names the build it announces and carries its `sha256`, so a receiver that downloads after the next publish asks for that build to get the file the hash is of:
+
+```erlang
+{ok, Written} = internetdata:database_download(Client, <<"vpn_ip_v1">>, mmdb, "vpn_ip_v1.mmdb",
+                                               #{build => Build}).
+```
+
+A build is kept 7 days. Past that the call answers `bad_request` with the message `<<"BUILD_GONE">>`, and downloading without `build` fetches the live one. `database_download_url/4` takes `timeout_ms` beside it; a transfer refuses one as `bad_request`.
 
 ### Verifying a download
 
