@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.12.1 - 2026-11-09
+
+### Fixes
+
+- Re-pin the spec to 2026.11.08: the token and revoke descriptions ([`9469e09`](https://github.com/internetdata/sdk-erlang/commit/9469e09293c5fb37e2123986663cc792a1a29ab8))
+
 ## 1.12.0 - 2026-11-07
 
 ### Features
