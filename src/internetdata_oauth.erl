@@ -198,7 +198,7 @@ authorization_url(#{base_url := BaseUrl}, Required, Optional) ->
             ++ [{<<"code_challenge_method">>, ?PKCE_METHOD}]
             ++ [{Name, Utf8} || {Name, Value} <- Optional, Utf8 <- [utf8(Name, Value)], Utf8 =/= <<>>],
         Query = lists:join(<<"&">>, [[Name, <<"=">>, percent_encode(Value)] || {Name, Value} <- Params]),
-        {ok, iolist_to_binary([BaseUrl, <<"/oauth/authorize?">>, Query])}
+        {ok, iolist_to_binary([internetdata_http:apex(BaseUrl), <<"/oauth/authorize?">>, Query])}
     catch
         throw:{bad_argument, Message} ->
             {error, #{kind => bad_request, retryable => false, message => Message}}

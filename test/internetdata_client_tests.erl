@@ -758,6 +758,57 @@ assert_body_bounded(Pace) ->
      end || {Name, Window, Call} <- Calls],
     internetdata_origin:stop(Origin).
 
+%% Every call but OAuth goes to the API host, the database's included, which
+%% answers there as it does on the apex.
+the_default_base_url_is_the_api_host_test() ->
+    Parent = self(),
+    Http = fun(#{url := Url}) ->
+        Parent ! {requested, Url},
+        {ok, #{status => 404, headers => [], body => <<"{}">>}}
+    end,
+    Client = internetdata:new(#{http => Http, retries => 0}),
+
+    _ = internetdata:database_list(Client),
+    _ = internetdata:oauth_metadata(Client),
+
+    ?assertEqual([<<"https://api.internetdata.io/api/v2/database/list">>,
+                  <<"https://internetdata.io/.well-known/oauth-authorization-server">>],
+                 requested([])).
+
+%% The authorization server is the apex the API host sits under, so `api.' is
+%% dropped and `api-<env>.' becomes `<env>.'; any other base URL is used as given.
+oauth_goes_to_the_apex_of_an_api_host_test_() ->
+    Cases = [{<<"https://api.internetdata.io">>, <<"https://internetdata.io">>},
+             {<<"https://api-staging.internetdata.io/">>, <<"https://staging.internetdata.io">>},
+             {<<"https://api-dev-2.internetdata.io">>, <<"https://dev-2.internetdata.io">>},
+             {<<"HTTPS://API.internetdata.io">>, <<"HTTPS://internetdata.io">>},
+             {<<"https://internetdata.io">>, <<"https://internetdata.io">>},
+             {<<"https://staging.internetdata.io">>, <<"https://staging.internetdata.io">>},
+             {<<"https://apis.example">>, <<"https://apis.example">>},
+             {<<"https://myapi.example">>, <<"https://myapi.example">>},
+             {<<"http://127.0.0.1:8080">>, <<"http://127.0.0.1:8080">>},
+             {<<"https://proxy.example/api.internetdata.io">>, <<"https://proxy.example/api.internetdata.io">>}],
+    [{binary_to_list(Base), fun() ->
+         Parent = self(),
+         Http = fun(#{url := Url}) ->
+             Parent ! {requested, Url},
+             {ok, #{status => 404, headers => [], body => <<"{}">>}}
+         end,
+         Client = internetdata:new(#{base_url => Base, http => Http, retries => 0}),
+         _ = internetdata:oauth_metadata(Client),
+         _ = internetdata:oauth_device_authorization(Client, <<"cli">>),
+         _ = internetdata:database_list(Client),
+         {ok, Url} = internetdata:oauth_authorization_url(Client, <<"cli">>, <<"http://127.0.0.1/cb">>, <<"c">>),
+         Api = trim(Base),
+         ?assertEqual([<<Apex/binary, "/.well-known/oauth-authorization-server">>,
+                       <<Apex/binary, "/oauth/device_authorization">>, <<Api/binary, "/api/v2/database/list">>],
+                      requested([])),
+         ?assertMatch(<<Apex:(byte_size(Apex))/binary, "/oauth/authorize?", _/binary>>, Url)
+     end} || {Base, Apex} <- Cases].
+
+trim(Url) ->
+    string:trim(Url, trailing, "/").
+
 requested(Acc) ->
     receive
         {requested, Url} -> requested([Url | Acc])

@@ -30,7 +30,7 @@
 -export_type([oauth_options/0, device_authorization_options/0, authorization_url_options/0,
               register_options/0]).
 
--define(DEFAULT_BASE_URL, <<"https://internetdata.io">>).
+-define(DEFAULT_BASE_URL, <<"https://api.internetdata.io">>).
 -define(DEFAULT_RETRIES, 2).
 -define(DEFAULT_TIMEOUT_MS, 30000).
 %% The longest `timeout_ms' the transport can wait on: httpc's timer and a
@@ -89,6 +89,10 @@ new() ->
 %% Create a key in the console with the `db.download' scope. Keys are
 %% default-deny, so an existing key does not gain database access until that
 %% scope is added to it.
+%%
+%% `base_url' defaults to `https://api.internetdata.io', where every call but the
+%% `oauth_*' ones goes. Those go to the apex it sits under, `api.' dropped and
+%% `api-<env>.' becoming `<env>.', and to any other base URL as given.
 %%
 %% `timeout_ms' is milliseconds from 1 to 4294967295, or `infinity' for no bound,
 %% and `retries' an integer of 0 or more; anything else raises `badarg' here

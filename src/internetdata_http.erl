@@ -7,7 +7,7 @@
 -module(internetdata_http).
 
 -export([ensure_ready/0, httpc_fun/0, get_json/4, get_json/5, get_redirect/4, get_stream/4, escape/1]).
--export([oauth_request/3, oauth_json_request/3, oauth/4]).
+-export([oauth_request/3, oauth_json_request/3, oauth/4, apex/1]).
 
 -export_type([request/0, response/0, result/0, sink/0, fold/0, http_fun/0, member/0]).
 
@@ -234,7 +234,7 @@ unreadable(Status, Message) ->
 -spec oauth_request(map(), binary(), [{binary(), binary()}] | undefined) -> request().
 oauth_request(#{base_url := BaseUrl, timeout_ms := TimeoutMs, user_agent := Agent}, Path, Form) ->
     Headers = [{<<"accept">>, <<"application/json">>}, {<<"user-agent">>, Agent}],
-    Request = #{method => get, url => <<BaseUrl/binary, Path/binary>>,
+    Request = #{method => get, url => <<(apex(BaseUrl))/binary, Path/binary>>,
                 headers => Headers, timeout_ms => TimeoutMs},
     case Form of
         undefined ->
@@ -242,6 +242,19 @@ oauth_request(#{base_url := BaseUrl, timeout_ms := TimeoutMs, user_agent := Agen
         _ ->
             FormType = {<<"content-type">>, <<"application/x-www-form-urlencoded">>},
             Request#{method := post, headers := Headers ++ [FormType], body => form(Form)}
+    end.
+
+%% @doc Where the authorization server is for a base URL: the apex the API host
+%% sits under, `api.' dropped and `api-<env>.' becoming `<env>.', because the
+%% issuer is the apex rather than the API host. Any other base URL is used as
+%% given, so a test origin or a proxy stays where the caller put it.
+-spec apex(binary()) -> binary().
+apex(BaseUrl) ->
+    case re:run(BaseUrl, <<"^([a-z][a-z0-9+.-]*://)api(-[a-z0-9-]+)?[.](.+)$">>,
+                [caseless, {capture, all_but_first, binary}]) of
+        {match, [Scheme, <<>>, Rest]} -> <<Scheme/binary, Rest/binary>>;
+        {match, [Scheme, <<"-", Env/binary>>, Rest]} -> <<Scheme/binary, Env/binary, ".", Rest/binary>>;
+        nomatch -> BaseUrl
     end.
 
 %% @doc `oauth_request/3' POSTing a JSON body, `/oauth/register''s. With no
