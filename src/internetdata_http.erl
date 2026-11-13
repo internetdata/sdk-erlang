@@ -1,12 +1,13 @@
 %% @doc The transport: one httpc profile, retry policy, and response classification.
 %%
-%% A request either buffers its body or streams it into a SINK. A catalog listing
-%% is small enough to hold; a dataset file is not, and the published catalog runs
-%% to gigabytes, so the sink is a fold that never sees more than one chunk at a
-%% time.
+%% A request either buffers its body or streams it into a SINK. A lookup and a
+%% catalog listing are small enough to hold; a dataset file is not, and the
+%% published catalog runs to gigabytes, so the sink is a fold that never sees more
+%% than one chunk at a time.
 -module(internetdata_http).
 
--export([ensure_ready/0, httpc_fun/0, get_json/4, get_json/5, get_redirect/4, get_stream/4, escape/1]).
+-export([ensure_ready/0, httpc_fun/0, get_json/4, get_json/5, post_json/5, get_redirect/4, get_stream/4,
+         escape/1, conforms/2]).
 -export([oauth_request/3, oauth_json_request/3, oauth/4, apex/1]).
 
 -export_type([request/0, response/0, result/0, sink/0, fold/0, http_fun/0, member/0]).
@@ -42,9 +43,10 @@
 
 -type http_fun() :: fun((request()) -> response()).
 
-%% The one member of an answer a call returns and the shape it must have, or
-%% the shape of an answer that is the whole object.
--type member() :: {binary(), shape()} | {whole, shape()}.
+%% What a 2xx must hold to be a call's answer: the one member it returns and the
+%% shape that member must have; the shape of an answer that is the whole object;
+%% or, for a batch chunk, a `results' or an `errors' object.
+-type member() :: {binary(), shape()} | {whole, shape()} | chunk.
 
 %% What a JSON value must be, at every depth. An object lists its members as
 %% {wire name, shape, required}: a required one must be present and not null,
@@ -52,8 +54,8 @@
 %% is there. A member the spec marks nullable is optional here, which is how a
 %% null `bytes' on a refused download stays an answer. `date' is RFC 3339's
 %% full-date and `date_time' its date-time with a zone, each on a day and at a
-%% time that exist.
--type shape() :: string | integer | boolean | object | date | date_time
+%% time that exist. `number' is JSON's, an integer or a float.
+-type shape() :: string | integer | number | boolean | object | date | date_time
                | {list, shape()} | {map_of, shape()} | {object, [{binary(), shape(), boolean()}]}.
 
 -export_type([shape/0]).
@@ -98,10 +100,18 @@ get_json(Client, Path, Query, Retries) ->
 get_json(Client, Path, Query, Retries, Member) ->
     with_retry(Client, api_request(Client, Path, Query), Retries, fun(Result) -> answer(Result, Member) end).
 
+%% @doc POST a JSON body and decode the JSON object it answers with. The one
+%% request with a body: the batch.
+-spec post_json(map(), binary(), binary(), non_neg_integer(), member()) ->
+    {ok, map() | [map()]} | {error, internetdata_error:error()}.
+post_json(Client, Path, Body, Retries, Member) ->
+    Request = (api_request(Client, Path, []))#{method := post, body => Body},
+    with_retry(Client, Request, Retries, fun(Result) -> answer(Result, Member) end).
+
 %% A 2xx is the answer only once it reads as one: a proxy's HTML page, a cut-off,
-%% empty or non-object body, or an object without the member is the server's
-%% fault, retried and carrying its status, never a value handed back as if it
-%% were the answer.
+%% empty or non-object body, or an object without what the call returns is the
+%% server's fault, retried and carrying its status, never a value handed back as
+%% if it were the answer.
 answer(#{status := Status, body := Body}, Member) when Status >= 200, Status < 300 ->
     Decoded = try json:decode(Body) catch _:_ -> unreadable end,
     case read(Decoded, Member) of
@@ -118,6 +128,11 @@ read(Object, {whole, Shape}) when is_map(Object) ->
         ok -> {ok, Object};
         {error, Message} -> {error, Message}
     end;
+read(Object, chunk) when is_map(Object) ->
+    case is_map(maps:get(<<"results">>, Object, null)) orelse is_map(maps:get(<<"errors">>, Object, null)) of
+        true -> {ok, Object};
+        false -> {error, <<"the API answered with neither results nor errors">>}
+    end;
 read(Object, {Key, Shape}) when is_map(Object) ->
     case maps:get(Key, Object, null) of
         null ->
@@ -131,10 +146,15 @@ read(Object, {Key, Shape}) when is_map(Object) ->
 read(_Decoded, _Member) ->
     {error, <<"the API did not answer with a JSON object">>}.
 
-%% ok, or an error naming the first member, by its path, that is not what the
-%% shape says.
+%% @doc ok when `Value' has `Shape' at every depth, or an error naming the first
+%% member, by its path, that does not.
+-spec conforms(shape(), term()) -> ok | {error, binary()}.
+conforms(Shape, Value) ->
+    conforms(Shape, Value, []).
+
 conforms(string, Value, _At) when is_binary(Value) -> ok;
 conforms(integer, Value, _At) when is_integer(Value) -> ok;
+conforms(number, Value, _At) when is_number(Value) -> ok;
 conforms(boolean, Value, _At) when is_boolean(Value) -> ok;
 conforms(object, Value, _At) when is_map(Value) -> ok;
 conforms(date, Value, At) when is_binary(Value) ->

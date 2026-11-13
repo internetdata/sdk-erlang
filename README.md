@@ -3,9 +3,9 @@
 [![hex.pm](https://img.shields.io/hexpm/v/internetdata.svg)](https://hex.pm/packages/internetdata)
 [![license](https://img.shields.io/hexpm/l/internetdata.svg)](LICENSE)
 
-The official Erlang client library for the [InternetData](https://internetdata.io) database API.
+The official Erlang client library for the [InternetData](https://internetdata.io) API.
 
-The library helps you browse the datasets your organization licenses and download them: IP and ASN data, published as gzipped CSV and MMDB.
+It tells you what every database InternetData publishes says about an IP address, an AS or a domain, and downloads the databases your organization licenses.
 
 ## Getting Started
 
@@ -14,11 +14,175 @@ The library helps you browse the datasets your organization licenses and downloa
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.12"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.13"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
-Every database endpoint published today is authenticated, so a client needs an API key for them. Create one in the [console](https://app.internetdata.io) with the `db.download` scope; keys are default-deny, so an existing key does not gain database access until that scope is added to it. `api_key` is nevertheless OPTIONAL: `internetdata:new()` builds a client that sends no `authorization` header at all, ready for a dataset served without a license.
+**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn`, `is_anycast`, `is_carrier`, `is_satellite`, the five service flags, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
+
+```erlang
+Client = internetdata:new(),
+
+{ok, Result} = internetdata:lookup(Client, <<"1.1.1.1">>),
+maps:get(is_anycast, Result).                    % true
+maps:get(country, maps:get(location, Result)).   % the ISO 3166 country code
+maps:get(name, maps:get(company, Result)).       % who the address belongs to
+```
+
+Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, which is a process, so build one somewhere long lived and call `internetdata:close(Client)` when you are finished with it.
+
+### With an API key
+
+Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domain count. The plans differ only in how many lookups they include, and a free account tries every field, 100 lookups a day. Create a key in the [console](https://app.internetdata.io), then pass it in:
+
+```erlang
+Client = internetdata:new(#{api_key => <<"your-api-key">>}),
+
+{ok, Result} = internetdata:lookup(Client, <<"146.70.116.130">>),
+maps:get(is_vpn, Result).                        % true, on a paid plan
+maps:get(provider, maps:get(vpn, Result)).       % <<"mullvad">>, on a paid plan
+maps:get(city, maps:get(location, Result)).      % <<"Vienna">>, on a paid plan
+```
+
+A detail map that is present but empty (`#{}`, or `[]` for `web`) means the flag above it is false. A populated one always carries every one of its keys.
+
+### An AS or a domain
+
+```erlang
+{ok, As} = internetdata:lookup_asn(Client, 9009),
+maps:get(name, As).                              % <<"M247 Europe SRL">>
+
+{ok, Domain} = internetdata:lookup_domain(Client, <<"example.com">>),
+maps:get(has_mx, Domain).                        % whether it has an MX record
+```
+
+Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record and the prefixes it announces, and the domain's records, its organization's IP ranges and whether it is disposable. Neither answer is cached, and both calls take the options `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries.
+
+### Your own address
+
+```erlang
+{ok, Result} = internetdata:my_ip(Client),
+maps:get(ip, Result).   % the address we saw this call come from
+```
+
+Same answer `lookup` would give for that address, and the same cost against your allowance. It is deliberately not cached: which address you are is the whole question, and a machine that moves between networks would otherwise be told where it used to be.
+
+### Your plan and usage
+
+```erlang
+{ok, Entitlement} = internetdata:my_entitlement(Client),
+Plan = maps:get(plan, Entitlement),
+Usage = maps:get(usage, Entitlement),
+maps:get(key, Plan).           % <<"max">>
+maps:get(requests, Usage).     % 580
+maps:get(window_end, Usage).   % when the allowance resets
+```
+
+Usage counts against the anniversary of your subscription on a paid plan, not the calendar month and not the billing period, and against the UTC day on the free plan; it is the same number a lookup is gated on. `hard_limit` is `null` on an uncapped plan, which is not the same as zero. `my_ip/2` and `my_entitlement/2` take a per-call options map.
+
+### Batch lookup
+
+Look up as many addresses as you like at once. Bogons and cached answers are handled locally, and everything else goes to the batch endpoint in chunks of up to 1000 addresses, in parallel. The batch endpoint needs a paid plan:
+
+```erlang
+Results = internetdata:lookup_batch(Client, [<<"146.70.116.130">>, <<"8.8.8.8">>, <<"1.1.1.1">>]),
+
+maps:foreach(fun
+    (Ip, {ok, Result}) -> io:format("~s: ~p~n", [Ip, maps:get(is_vpn, Result)]);
+    (Ip, {error, Error}) -> io:format("~s: ~s~n", [Ip, maps:get(message, Error)])
+end, Results).
+```
+
+Results are keyed by address, so duplicates in your list collapse into a single entry and one address failing never loses the rest: it carries its error as its value, with the status the API would have given that address on its own. Erlang maps carry no order, so iterate your own list when order matters.
+
+How many chunks are in flight at once, how many times a failed chunk is retried, and how long each chunk's request may take are configurable per call:
+
+```erlang
+Results = internetdata:lookup_batch(Client, ManyIps, #{concurrency => 4, retries => 4, timeout_ms => 5000}).
+```
+
+### Caching
+
+Answers are cached by default, so repeat lookups of the same address are free:
+
+```erlang
+Client = internetdata:new(),
+
+{ok, Result} = internetdata:lookup(Client, <<"1.1.1.1">>),
+maps:get(is_anycast, Result).    % true, API request
+
+{ok, Result2} = internetdata:lookup(Client, <<"1.1.1.1">>),
+maps:get(is_anycast, Result2).   % true, no API request, result was cached
+```
+
+You can change the default cache variables (max size, TTL, etc) on initialization, or even disable it:
+
+```erlang
+Client = internetdata:new(#{cache => #{max => 50000, ttl_ms => 6 * 60 * 60 * 1000}}),
+ClientNoCache = internetdata:new(#{cache => false}).
+```
+
+The cache belongs to one client and is never shared, because two clients holding different keys are on different plans and so entitled to different fields. It is owned by a process linked to whoever called `new/1`, so a client built inside a short-lived process loses its cache when that process ends. `internetdata:close(Client)` releases it; a client built with `cache => false` starts no process at all and needs no closing.
+
+### Private and reserved addresses
+
+Private, loopback, link-local, documentation and multicast addresses (and their IPv6 equivalents, including the 6to4 and Teredo ranges) are not routable on the public internet. The library answers them locally, so they cost no request and no quota:
+
+```erlang
+{ok, Result} = internetdata:lookup(Client, <<"192.168.1.1">>),
+maps:get(is_bogon, Result).   % true, answered without a request
+maps:get(is_vpn, Result).     % false
+```
+
+A locally computed answer is deliberately the widest shape the API serves, so every flag is present and false and every detail map is present and empty. Do not read your plan's features off one.
+
+The check is available on the client, which is handy when your inputs are addresses anyway:
+
+```erlang
+internetdata:is_bogon(Client, <<"10.0.0.1">>).   % true
+internetdata:is_bogon(Client, <<"8.8.8.8">>).    % false
+```
+
+It is also callable on its own, if you want it without a client:
+
+```erlang
+internetdata:is_bogon(<<"10.0.0.1">>).   % true
+```
+
+### Errors
+
+A failure answers `{error, Error}`, where `Error` is a map carrying a `kind` and a `retryable` flag:
+
+```erlang
+case internetdata:lookup(Client, <<"1.1.1.1">>) of
+    {ok, Result} ->
+        maps:get(is_anycast, Result);
+    {error, #{kind := unauthorized}} ->
+        check_your_api_key();
+    {error, Error} ->
+        io:format("~p: ~s~n", [maps:get(kind, Error), maps:get(message, Error)])
+end.
+```
+
+`kind` is one of `bad_request`, `unauthorized`, `forbidden`, `rate_limited`, `quota_exceeded`, `server_error`, `network` or `io`. `status` carries the HTTP status where there was one, and `message` is the API's own: a lookup's refusal says what went wrong, and a database call's names its result code, so `NOT_LICENSED`, `LICENSE_EXPIRED` and `IP_NOT_ALLOWED` (a call from an address the key or its organization does not allow) tell you which 403 you got without having to ask us.
+
+Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are not the same thing. A rate limit carries `Retry-After`, and retrying later works; a spent allowance, such as an overage cap you set in Billing, needs the cap raised or the window to roll over. The library retries rate limits for you, but never a spent allowance.
+
+### Timeouts and retries
+
+```erlang
+Client = internetdata:new(#{api_key => <<"your-api-key">>, retries => 4, timeout_ms => 30000}),
+
+{ok, Result} = internetdata:lookup(Client, <<"146.70.116.130">>, #{retries => 0, timeout_ms => 2000}).
+```
+
+`timeout_ms` bounds each attempt, body included, so a call that is retried can take longer in total. The client's values are defaults: `lookup/3`, `lookup_batch/3`, `lookup_asn/3`, `lookup_domain/3`, `my_ip/2` and `my_entitlement/2` each take `retries` and `timeout_ms` for that call alone, and `database_downloads/2`, `database_download_url/4` and every `oauth_*` function take `timeout_ms`. During a download it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size.
+
+`timeout_ms` is milliseconds from 1 to 4294967295 (about 49.7 days), or `infinity` for no bound. Anything else is refused where it is set: `new/1` raises `badarg`, and a call answers `bad_request` before sending anything.
+
+### Databases
+
+The database endpoints need an API key with the `db.download` scope. Keys are default-deny, so an existing key does not gain database access until that scope is added to it in the [console](https://app.internetdata.io).
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -26,8 +190,6 @@ Client = internetdata:new(#{api_key => <<"your-api-key">>}),
 {ok, Databases} = internetdata:database_list(Client),
 [maps:get(base, D) || D <- Databases].   % [<<"bogon_ip">>, <<"vpn_ip">>, ...]
 ```
-
-Every call answers `{ok, Term}` or `{error, Error}`. The client is a plain term holding no process and no connection of its own, so there is nothing to close and nothing to keep alive.
 
 ### The catalog
 
@@ -114,39 +276,6 @@ Read the checksums after the transfer rather than before it: a build published i
  || A <- Attempts].
 ```
 
-### Errors
-
-A failure answers `{error, Error}`, where `Error` is a map carrying a `kind` and a `retryable` flag:
-
-```erlang
-case internetdata:database_download_url(Client, <<"vpn_ip_v1">>, mmdb) of
-    {ok, Url} ->
-        fetch(Url);
-    {error, #{kind := forbidden, message := Rc}} ->
-        io:format("not licensed: ~s~n", [Rc]);
-    {error, Error} ->
-        io:format("~p: ~s~n", [maps:get(kind, Error), maps:get(message, Error)])
-end.
-```
-
-`kind` is one of `bad_request`, `unauthorized`, `forbidden`, `rate_limited`, `quota_exceeded`, `server_error`, `network` or `io`. `status` carries the HTTP status where there was one, and `message` is the API's own result code, so `NOT_LICENSED`, `LICENSE_EXPIRED` and `IP_NOT_ALLOWED` (a call from an address the key or its organization does not allow) tell you which 403 you got without having to ask us.
-
-`rate_limited` is a 429 that carries `Retry-After`, and the library retries it for you. `quota_exceeded` is a 429 without one, which it never retries. InternetData's database API has no quota, so you won't see `quota_exceeded` from it.
-
-### Timeouts and retries
-
-```erlang
-Client = internetdata:new(#{api_key => <<"your-api-key">>, retries => 4, timeout_ms => 60000}).
-```
-
-`timeout_ms` bounds the wait for a whole request, body included, except during a download, where it bounds the wait between chunks instead: a deadline that suits a listing is the wrong one for a gigabyte, while a transfer that has stopped making progress is stalled at any size. It bounds each attempt, so a call that is retried can take longer in total, and `database_downloads/2` and every `oauth_*` function take a `timeout_ms` of their own for that call alone:
-
-```erlang
-{ok, Attempts} = internetdata:database_downloads(Client, #{limit => 20, timeout_ms => 5000}).
-```
-
-`timeout_ms` is milliseconds from 1 to 4294967295 (about 49.7 days), or `infinity` for no bound. Anything else is refused where it is set: `new/1` raises `badarg`, and a call answers `bad_request` before sending anything.
-
 ### Sign in with OAuth (device flow)
 
 A program running on a person's own machine can let them sign in with their browser and pick one of their API keys, instead of asking them to paste one.
@@ -196,13 +325,23 @@ Client = internetdata:new(),
 
 Each redirect URI must be https on a public host name, or http on a loopback address, which then matches any port. Nothing is kept until a person approves the client, so an app with no client ID saved can simply register again.
 
+### Absent is not false
+
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `rpki_status`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its daily trial is spent. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+
+```erlang
+maps:get(is_vpn, Result, false).          % when you only want the flag
+maps:is_key(is_vpn, Result).              % false on Unlimited: not in your plan
+maps:get(trial_expired, Result, false).   % true: a free-plan key's daily trial is spent
+```
+
 ## Other Libraries
 
 There are official InternetData client libraries available for many languages including PHP, Python, Go, Java, and Ruby. See our GitHub at https://github.com/internetdata for more.
 
 ## About InternetData
 
-Geolocation, anonymity, ownership and network databases for IP addresses and AS numbers, licensed as files you download and query yourself.
+Geolocation, anonymity, ownership and network data for IP addresses, AS numbers and domains, as an API and as databases you download and query yourself.
 
 [<img src="https://s3.internetdata.io/internetdata-public/brand/mark.svg" alt="InternetData" height="64"/>](https://internetdata.io/)
 

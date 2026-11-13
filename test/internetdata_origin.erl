@@ -1,14 +1,14 @@
 %% A real HTTP origin on a real socket, for the claims a stubbed transport cannot
-%% make honestly: that a redirect to a huge file is not followed, that a dataset
-%% transfer really does move bytes over a socket and stops when they run out, and
-%% that a large body is handed over in pieces rather than assembled in memory
-%% first.
+%% make honestly: that httpc itself lets the configured number of requests run at
+%% once, that a redirect to a huge file is not followed, that a dataset transfer
+%% really does move bytes over a socket and stops when they run out, and that a
+%% large body is handed over in pieces rather than assembled in memory first.
 %%
 %% It doubles as the object storage behind a 302, so a download test can check
 %% that the second request carried no credential.
 -module(internetdata_origin).
 
--export([start/1, stop/1, base_url/1, hits/2, authorized/2, payload/0, large_bytes/0]).
+-export([start/1, stop/1, base_url/1, peak/1, hits/2, authorized/2, payload/0, large_bytes/0]).
 
 -define(HUGE_BYTES, 5000000000).
 -define(PAYLOAD_BYTES, 3000000).
@@ -30,6 +30,10 @@ stop(Pid) ->
 base_url(Pid) ->
     Port = ask(Pid, port),
     iolist_to_binary(io_lib:format("http://127.0.0.1:~b", [Port])).
+
+%% @doc The highest number of requests that were being served at the same moment.
+peak(Pid) ->
+    ask(Pid, peak).
 
 %% @doc How many times one path was requested.
 hits(Pid, Path) ->
@@ -60,15 +64,18 @@ boot(Parent, Options) ->
     Self = self(),
     spawn_link(fun() -> accept_loop(Listen, Self, Options#{port => Port}) end),
     Parent ! {?MODULE, self(), ready},
-    loop(#{port => Port, hits => #{}, authorized => #{}}).
+    loop(#{port => Port, in_flight => 0, peak => 0, hits => #{}, authorized => #{}}).
 
-loop(#{hits := Hits, authorized := Auth} = State) ->
+loop(#{in_flight := InFlight, peak := Peak, hits := Hits, authorized := Auth} = State) ->
     receive
         {started, Path, Credentialed} ->
-            loop(State#{hits := maps:update_with(Path, fun(N) -> N + 1 end, 1, Hits),
+            loop(State#{in_flight := InFlight + 1, peak := max(Peak, InFlight + 1),
+                        hits := maps:update_with(Path, fun(N) -> N + 1 end, 1, Hits),
                         authorized := maps:update_with(Path, fun(A) -> A orelse Credentialed end,
                                                        Credentialed, Auth)});
-        {Key, From, Ref} when Key =:= port; Key =:= hits; Key =:= authorized ->
+        finished ->
+            loop(State#{in_flight := InFlight - 1});
+        {Key, From, Ref} when Key =:= port; Key =:= peak; Key =:= hits; Key =:= authorized ->
             From ! {Ref, maps:get(Key, State)},
             loop(State);
         {stop, From, Ref} ->
@@ -86,14 +93,16 @@ accept_loop(Listen, Counter, Options) ->
 
 serve(Socket, Counter, Options) ->
     case read_request(Socket) of
-        {ok, Path, Query, Credentialed} ->
+        {ok, Path, Query, Credentialed, Body} ->
             Counter ! {started, Path, Credentialed},
             timer:sleep(maps:get(delay_ms, Options, 0)),
             case {maps:find(body_pace, Options), Path} of
                 {{ok, Pace}, _} -> paced(Socket, Pace);
                 {error, <<"/flaky">>} -> flaky(Socket, Counter);
+                {error, <<"/batch">>} -> respond_batch(Socket, Body);
                 {error, _} -> respond(Socket, Path, Query, Options)
             end,
+            Counter ! finished,
             gen_tcp:close(Socket);
         error ->
             gen_tcp:close(Socket)
@@ -103,7 +112,9 @@ read_request(Socket) ->
     case gen_tcp:recv(Socket, 0, 5000) of
         {ok, {http_request, _Method, {abs_path, Target}, _Version}} ->
             [Path | Rest] = binary:split(Target, <<"?">>),
-            {ok, Path, iolist_to_binary(Rest), headers(Socket, false)};
+            Seen = headers(Socket, #{credentialed => false, length => 0}),
+            #{credentialed := Credentialed, length := Length} = Seen,
+            {ok, Path, iolist_to_binary(Rest), Credentialed, body(Socket, Length)};
         {ok, _Other} ->
             read_request(Socket);
         {error, _} ->
@@ -111,14 +122,41 @@ read_request(Socket) ->
     end.
 
 %% Answers whether a credential was presented, which is the whole question at the
-%% object storage end of a download.
-headers(Socket, Credentialed) ->
+%% object storage end of a download, and how long the body is, which a POST
+%% carries after the blank line.
+headers(Socket, Seen) ->
     case gen_tcp:recv(Socket, 0, 5000) of
-        {ok, http_eoh} -> Credentialed;
-        {ok, {http_header, _, 'Authorization', _, _}} -> headers(Socket, true);
-        {ok, _} -> headers(Socket, Credentialed);
-        {error, _} -> Credentialed
+        {ok, http_eoh} -> Seen;
+        {ok, {http_header, _, 'Authorization', _, _}} -> headers(Socket, Seen#{credentialed := true});
+        {ok, {http_header, _, 'Content-Length', _, Value}} ->
+            headers(Socket, Seen#{length := binary_to_integer(Value)});
+        {ok, _} -> headers(Socket, Seen);
+        {error, _} -> Seen
     end.
+
+%% httpc sends `Content-Length: 0' on a GET, and a recv of 0 bytes would wait out
+%% its whole timeout.
+body(_Socket, 0) ->
+    <<>>;
+body(Socket, Length) ->
+    ok = inet:setopts(Socket, [{packet, raw}]),
+    case gen_tcp:recv(Socket, Length, 5000) of
+        {ok, Body} -> Body;
+        {error, _} -> <<>>
+    end.
+
+%% A batch is answered from the addresses in its body, each one an Unlimited
+%% answer.
+respond_batch(Socket, Body) ->
+    Ips = try json:decode(Body) of
+        #{<<"ips">> := List} when is_list(List) -> List;
+        _ -> []
+    catch
+        _:_ -> []
+    end,
+    Results = maps:from_list([{Ip, internetdata_stub:answer(Ip)} || Ip <- Ips]),
+    Answer = iolist_to_binary(json:encode(#{<<"results">> => Results, <<"errors">> => #{}})),
+    send(Socket, 200, [{<<"content-type">>, <<"application/json">>}], Answer).
 
 %% Announces gigabytes and then stalls. A client that followed the redirect would
 %% sit here until its own timeout, which is exactly the failure this exists to
@@ -167,9 +205,29 @@ respond(Socket, <<"/api/v2/database/download">>, Query, Options) ->
                                                       [maps:get(port, Options), Id])),
             send(Socket, 302, [{<<"location">>, Location}], <<>>)
     end;
-respond(Socket, _Path, _Query, _Options) ->
+%% The lookups answer from what their path names: an address, the caller's, an
+%% AS or a domain, each in the shape every plan answers.
+respond(Socket, <<"/myip">>, _Query, _Options) ->
+    json(Socket, internetdata_stub:answer(<<"203.0.113.9">>));
+respond(Socket, <<"/asn/", Asn/binary>>, _Query, _Options) ->
+    json(Socket, #{<<"asn">> => binary_to_integer(Asn), <<"name">> => <<>>, <<"country">> => <<>>,
+                   <<"registry">> => <<>>, <<"allocated">> => <<>>, <<"domain">> => <<>>});
+respond(Socket, <<"/domain/", Domain/binary>>, _Query, _Options) ->
+    Flags = maps:from_keys([<<"is_registered">>, <<"has_a">>, <<"has_aaaa">>, <<"has_mx">>, <<"has_ns">>,
+                            <<"has_cname">>], false),
+    json(Socket, Flags#{<<"domain">> => Domain});
+respond(Socket, <<"/", Target/binary>> = Path, Query, Options) ->
+    case inet:parse_strict_address(binary_to_list(Target)) of
+        {ok, _} -> json(Socket, internetdata_stub:answer(Target));
+        {error, _} -> unknown(Socket, Path, Query, Options)
+    end.
+
+unknown(Socket, _Path, _Query, _Options) ->
     send(Socket, 404, [{<<"content-type">>, <<"application/json">>}],
          iolist_to_binary(json:encode(#{<<"rc">> => <<"UNKNOWN_DATASET">>}))).
+
+json(Socket, Wire) ->
+    send(Socket, 200, [{<<"content-type">>, <<"application/json">>}], iolist_to_binary(json:encode(Wire))).
 
 %% The head goes out at once and the body does not, so a bound that stops at the
 %% headers never sees the stall. `{stall, Ms}' sends half the body and waits;

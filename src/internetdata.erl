@@ -1,17 +1,26 @@
-%% @doc The official Erlang client for the InternetData database API.
+%% @doc The official Erlang client for the InternetData API.
 %%
-%% Build a client once with {@link new/1} and pass the term around. It holds no
-%% process and no socket of its own, so there is nothing to release. Every call
-%% answers `{ok, Term}' or `{error, Error}'; nothing here raises for a failure
-%% the API can report.
+%% Build a client once with {@link new/1}, pass the term around, and release it
+%% with {@link close/1}. Every call answers `{ok, Term}' or `{error, Error}';
+%% nothing here raises for a failure the API can report.
+%%
+%% <b>Absent is not false.</b> A lookup answer is a map whose plan-gated keys are
+%% simply MISSING when your plan does not include them, which is a different
+%% answer from the key being present and `false'. Use `maps:get(is_hosting,
+%% Result, undefined)' or `maps:find(is_hosting, Result)' when the distinction
+%% matters, and `maps:get(is_hosting, Result, false)' when it does not.
 %%
 %% Results are maps keyed by ATOMS for the fields the API documents, and by
 %% BINARIES for anything the server names: the format keys under `schema',
-%% `sample' and `size', and the dataset column names inside a sample row. See
-%% {@link internetdata_result} for why.
+%% `sample' and `size', the dataset column names inside a sample row, and an AS
+%% answer's `whois'. See {@link internetdata_result} for why.
 -module(internetdata).
 
--export([new/0, new/1]).
+-export([new/0, new/1, close/1]).
+-export([is_bogon/1, is_bogon/2]).
+-export([lookup/2, lookup/3, lookup_batch/2, lookup_batch/3, lookup_asn/2, lookup_asn/3,
+         lookup_domain/2, lookup_domain/3]).
+-export([my_ip/1, my_ip/2, my_entitlement/1, my_entitlement/2]).
 -export([database_list/1, database_metadata/2, database_checksums/3,
          database_downloads/1, database_downloads/2, database_download_url/3,
          database_download_url/4, database_download/4, database_download/5,
@@ -25,21 +34,33 @@
          oauth_exchange_authorization_code/6, oauth_create_pkce/0, oauth_pkce_challenge/1]).
 -export([oauth_register/2, oauth_register/3]).
 
--export_type([client/0, options/0, downloads_options/0, download_url_options/0,
-              download_options/0, format/0]).
+-export_type([client/0, options/0, address/0, lookup_options/0, batch_options/0, downloads_options/0,
+              download_url_options/0, download_options/0, format/0]).
 -export_type([oauth_options/0, device_authorization_options/0, authorization_url_options/0,
               register_options/0]).
 
 -define(DEFAULT_BASE_URL, <<"https://api.internetdata.io">>).
+-define(DEFAULT_CONCURRENCY, 8).
 -define(DEFAULT_RETRIES, 2).
+-define(DEFAULT_CACHE_MAX, 10000).
+-define(DEFAULT_CACHE_TTL_MS, 3600000).
 -define(DEFAULT_TIMEOUT_MS, 30000).
 %% The longest `timeout_ms' the transport can wait on: httpc's timer and a
 %% `receive ... after' both raise `timeout_value' past 2^32 - 1 ms (~49.7 days).
 -define(MAX_TIMEOUT_MS, 4294967295).
+-define(BATCH_TAG, '$internetdata_batch').
+%% The most addresses POST /batch takes in one call; a larger batch is sent in
+%% chunks of this size.
+-define(BATCH_MAX, 1000).
+%% What a lookup answer must be, whatever the plan: the members every plan
+%% answers, and every other member typed wherever it is present.
+-define(LOOKUP, {whole, lookup_shape()}).
 
 -opaque client() :: #{
     base_url := binary(),
     api_key := binary() | undefined,
+    cache := internetdata_cache:cache() | undefined,
+    concurrency := pos_integer(),
     retries := non_neg_integer(),
     timeout_ms := pos_integer() | infinity,
     user_agent := binary(),
@@ -49,11 +70,18 @@
 -type options() :: #{
     api_key => binary() | string() | false | nil,
     base_url => binary() | string(),
+    cache => #{max => pos_integer(), ttl_ms => pos_integer()} | false,
+    concurrency => pos_integer(),
     retries => non_neg_integer(),
     timeout_ms => pos_integer() | infinity,
     http => internetdata_http:http_fun()
 }.
 
+%% An address as text, or as the tuple `inet' and Cowboy hand one over as.
+-type address() :: binary() | string() | inet:ip_address().
+-type lookup_options() :: #{retries => non_neg_integer(), timeout_ms => pos_integer() | infinity}.
+-type batch_options() :: #{retries => non_neg_integer(), concurrency => pos_integer(),
+                           timeout_ms => pos_integer() | infinity}.
 -type downloads_options() :: #{limit => pos_integer(), timeout_ms => pos_integer() | infinity}.
 %% `build' names one build of a database, as a `database.updated' webhook gives
 %% it; absent or empty, a download fetches the build that is live.
@@ -79,28 +107,31 @@ new() ->
 
 %% @doc Build a client.
 %%
-%% `api_key' is optional. Every database endpoint published today is
-%% authenticated, so a client built without one answers 401 there - but that is
-%% what the API serves rather than a property of its shape, and a client that
-%% could not be BUILT without a key would have to break its own signature the day
-%% a dataset is served free. Without one no `authorization' header is sent at all,
-%% and the `oauth_*' functions never send one.
-%%
-%% Create a key in the console with the `db.download' scope. Keys are
-%% default-deny, so an existing key does not gain database access until that
-%% scope is added to it.
+%% `api_key' is optional: without one a lookup is on Unlimited, the free plan,
+%% answering `ip', `is_bogon', the Tor and relay members, InternetData's own
+%% flags, `location', `asn', `company', `hostname' and `abuse' with no daily or
+%% monthly cap. A batch needs a key on a paid plan, and the database endpoints a
+%% key with the `db.download' scope. Without one no `authorization' header is
+%% sent at all, and the `oauth_*' functions never send one. An empty or blank key
+%% is no key, and so are `false', which is what
+%% `os:getenv/1' answers for a variable that is not set, and `nil', Elixir's
+%% `System.get_env/1' answer for one. The key is trimmed, so one read from a file
+%% with its newline works; one still holding a control character raises
+%% `{badarg, {api_key, control_character}}', naming the cause and not the key.
 %%
 %% `base_url' defaults to `https://api.internetdata.io', where every call but the
 %% `oauth_*' ones goes. Those go to the apex it sits under, `api.' dropped and
 %% `api-<env>.' becoming `<env>.', and to any other base URL as given.
 %%
 %% `timeout_ms' is milliseconds from 1 to 4294967295, or `infinity' for no bound,
-%% and `retries' an integer of 0 or more; anything else raises `badarg' here
-%% rather than failing every call. The key is trimmed, and one of blanks alone is
-%% no key, as are `false', which is what `os:getenv/1' answers for a variable
-%% that is not set, and `nil', Elixir's `System.get_env/1' answer for one. One
-%% holding a control character raises
-%% `{badarg, {api_key, control_character}}', naming the cause and not the key.
+%% `retries' an integer of 0 or more and `concurrency' an integer of 1 or more;
+%% anything else raises `badarg' here rather than failing every call.
+%%
+%% The cache is per client and never shared, because two clients holding
+%% different keys are on different plans and so entitled to different fields.
+%% Unless `cache' is `false' this starts a process linked to the caller, which
+%% ends when the caller does, so build clients somewhere long lived and `close/1'
+%% them when you are done.
 -spec new(options()) -> client().
 new(Options) ->
     TimeoutMs = maps:get(timeout_ms, Options, ?DEFAULT_TIMEOUT_MS),
@@ -108,12 +139,15 @@ new(Options) ->
         true -> ok;
         false -> erlang:error({badarg, {timeout_ms, TimeoutMs}})
     end,
-    %% Erlang orders every atom above every number, so `infinity' would retry an
-    %% outage for ever.
     Retries = maps:get(retries, Options, ?DEFAULT_RETRIES),
-    case is_integer(Retries) andalso Retries >= 0 of
+    case valid_retries(Retries) of
         true -> ok;
         false -> erlang:error({badarg, {retries, Retries}})
+    end,
+    Concurrency = maps:get(concurrency, Options, ?DEFAULT_CONCURRENCY),
+    case is_integer(Concurrency) andalso Concurrency >= 1 of
+        true -> ok;
+        false -> erlang:error({badarg, {concurrency, Concurrency}})
     end,
     Key = api_key(Options),
     case maps:is_key(http, Options) of
@@ -123,11 +157,219 @@ new(Options) ->
     #{
         base_url => trim_slashes(bin(maps:get(base_url, Options, ?DEFAULT_BASE_URL))),
         api_key => Key,
+        cache => cache(maps:get(cache, Options, #{})),
+        concurrency => Concurrency,
         retries => Retries,
         timeout_ms => TimeoutMs,
         user_agent => user_agent(),
         http => maps:get(http, Options, internetdata_http:httpc_fun())
     }.
+
+%% @doc Release the client's cache. Safe to call on a client that has none.
+-spec close(client()) -> ok.
+close(#{cache := undefined}) ->
+    ok;
+close(#{cache := Cache}) ->
+    internetdata_cache:stop(Cache).
+
+%% @doc Whether an address is private, loopback, link-local, documentation,
+%% multicast or otherwise not routable, including the IPv6 equivalents and the
+%% 6to4 and Teredo ranges.
+%%
+%% These are the addresses {@link lookup/2} answers locally, so they cost no
+%% request and no quota. Usable without a client.
+-spec is_bogon(binary() | string()) -> boolean().
+is_bogon(Ip) ->
+    internetdata_bogon:is_bogon(Ip).
+
+%% @doc {@link is_bogon/1}, reachable from a client you already hold.
+-spec is_bogon(client(), binary() | string()) -> boolean().
+is_bogon(_Client, Ip) ->
+    internetdata_bogon:is_bogon(Ip).
+
+-spec lookup(client(), address()) ->
+    {ok, internetdata_result:result()} | {error, internetdata_error:error()}.
+lookup(Client, Ip) ->
+    lookup(Client, Ip, #{}).
+
+%% @doc What every database says about one address.
+%%
+%% `Ip' is text, or a tuple as `inet:peername/1' and Cowboy's `peer' give it. A
+%% bogon is answered locally and never reaches the network. Everything else is
+%% served, then cached for this client alone. Text that is no IP address is a
+%% `bad_request' with nothing sent: {@link lookup_asn/2} and
+%% {@link lookup_domain/2} look an AS and a domain up.
+%%
+%% `Options' overrides the client's `retries' and `timeout_ms' for this call
+%% alone. `timeout_ms' bounds each attempt, so a retried call can take longer in
+%% total.
+-spec lookup(client(), address(), lookup_options()) ->
+    {ok, internetdata_result:result()} | {error, internetdata_error:error()}.
+lookup(Client, Ip, Options) ->
+    checked(Options, fun() ->
+        %% Judged, cached and sent as the IPv4 address it carries, if it is mapped.
+        Addr = internetdata_bogon:unmapped(address(Ip)),
+        case {is_address(Addr), internetdata_bogon:is_bogon(Addr)} of
+            {false, _} -> not_an_address(Addr);
+            {true, true} -> {ok, internetdata_result:bogon(Addr)};
+            {true, false} -> served(Client, Addr, Options)
+        end
+    end).
+
+-spec lookup_asn(client(), 0..4294967295) ->
+    {ok, internetdata_result:asn_result()} | {error, internetdata_error:error()}.
+lookup_asn(Client, Asn) ->
+    lookup_asn(Client, Asn, #{}).
+
+%% @doc What InternetData knows about one autonomous system: its registration on
+%% every plan, and on a paid one its ASN Whois record and the prefixes it
+%% announces.
+%%
+%% `Asn' is the AS number, sent as given; one the API cannot read is a
+%% `bad_request'. Never cached. `Options' is {@link lookup/3}'s.
+-spec lookup_asn(client(), 0..4294967295, lookup_options()) ->
+    {ok, internetdata_result:asn_result()} | {error, internetdata_error:error()}.
+lookup_asn(Client, Asn, Options) ->
+    checked(Options, fun() ->
+        Path = <<"/asn/", (integer_to_binary(Asn))/binary>>,
+        Retries = maps:get(retries, Options, maps:get(retries, Client)),
+        case internetdata_http:get_json(bound(Client, Options), Path, [], Retries, {whole, asn_shape()}) of
+            {ok, Body} -> {ok, internetdata_result:asn(Body)};
+            {error, Error} -> {error, Error}
+        end
+    end).
+
+-spec lookup_domain(client(), binary() | string()) ->
+    {ok, internetdata_result:domain_result()} | {error, internetdata_error:error()}.
+lookup_domain(Client, Domain) ->
+    lookup_domain(Client, Domain, #{}).
+
+%% @doc What InternetData knows about one domain: whether it is registered and
+%% which record types it has on every plan, and on a paid one the records, its
+%% organization's IP ranges and whether it is disposable.
+%%
+%% `Domain' is sent as given, and the API normalizes it; one it cannot read is a
+%% `bad_request'. Never cached. `Options' is {@link lookup/3}'s.
+-spec lookup_domain(client(), binary() | string(), lookup_options()) ->
+    {ok, internetdata_result:domain_result()} | {error, internetdata_error:error()}.
+lookup_domain(Client, Domain, Options) ->
+    checked(Options, fun() ->
+        Path = <<"/domain/", (internetdata_http:escape(bin(Domain)))/binary>>,
+        Retries = maps:get(retries, Options, maps:get(retries, Client)),
+        case internetdata_http:get_json(bound(Client, Options), Path, [], Retries, {whole, domain_shape()}) of
+            {ok, Body} -> {ok, internetdata_result:domain(Body)};
+            {error, Error} -> {error, Error}
+        end
+    end).
+
+-spec my_ip(client()) ->
+    {ok, internetdata_result:result()} | {error, internetdata_error:error()}.
+my_ip(Client) ->
+    my_ip(Client, #{}).
+
+%% @doc What every database says about the address this client is calling from.
+%%
+%% The same answer {@link lookup/2} would give for that address, at the same cost
+%% against your allowance. The address is the one our edge observed, so a call
+%% made through a proxy or a VPN reports the exit it left through - usually the
+%% point of asking.
+%%
+%% Deliberately NOT cached. The cache is keyed by address, and which address this
+%% is IS the question: a machine that moves between networks would otherwise be
+%% told where it used to be.
+-spec my_ip(client(), lookup_options()) ->
+    {ok, internetdata_result:result()} | {error, internetdata_error:error()}.
+my_ip(Client, Options) ->
+    checked(Options, fun() ->
+        Retries = maps:get(retries, Options, maps:get(retries, Client)),
+        case internetdata_http:get_json(bound(Client, Options), <<"/myip">>, [], Retries, ?LOOKUP) of
+            {ok, Body} -> {ok, internetdata_result:from_wire(Body)};
+            {error, Error} -> {error, Error}
+        end
+    end).
+
+-spec my_entitlement(client()) ->
+    {ok, internetdata_result:entitlement()} | {error, internetdata_error:error()}.
+my_entitlement(Client) ->
+    my_entitlement(Client, #{}).
+
+%% @doc What this client's key is entitled to, and how much of it has been used.
+%%
+%% Named for what it answers rather than `me', which sits one letter from
+%% {@link my_ip/1} and means something quite different: one is which address you
+%% are calling FROM, the other is what the key you are calling WITH may spend.
+%%
+%% Unlike a lookup there is no useful unauthenticated answer, so a client built
+%% without an API key gets an unauthorized error rather than a partial one.
+%%
+%% Usage counts against the ALLOWANCE WINDOW - on a paid plan the anniversary
+%% of the subscription, not the calendar month and not the billing period, and
+%% on the free plan the UTC day - and it is the same number a lookup is gated
+%% on. `hard_limit' is `null' when we never stop serving, which is not the
+%% same as a limit of zero.
+%%
+%% Deliberately NOT cached: the whole point is what has been spent, and a cached
+%% answer is a wrong one within seconds of the next request.
+-spec my_entitlement(client(), lookup_options()) ->
+    {ok, internetdata_result:entitlement()} | {error, internetdata_error:error()}.
+my_entitlement(Client, Options) ->
+    checked(Options, fun() ->
+        Retries = maps:get(retries, Options, maps:get(retries, Client)),
+        Shape = {whole, entitlement_shape()},
+        case internetdata_http:get_json(bound(Client, Options), <<"/api/v1/entitlement">>, [], Retries,
+                                        Shape) of
+            {ok, Body} -> {ok, internetdata_result:entitlement(Body)};
+            {error, Error} -> {error, Error}
+        end
+    end).
+
+-spec lookup_batch(client(), [address()]) ->
+    #{binary() => {ok, internetdata_result:result()} | {error, internetdata_error:error()}}.
+lookup_batch(Client, Ips) ->
+    lookup_batch(Client, Ips, #{}).
+
+%% @doc Look many addresses up in as few requests as possible.
+%%
+%% Bogons are answered locally and cached answers are reused; everything else
+%% goes to the batch endpoint in chunks of up to 1000 addresses, with at most
+%% `concurrency' chunks in flight. Keyed by address rather than positional, so
+%% duplicates in the input collapse to a single entry and the caller never has
+%% to line two lists up. An address that fails carries its `{error, Error}' as
+%% its value, so one bad entry cannot lose the rest of the answers: the API
+%% reports a per-entry failure with the status the single lookup would have
+%% answered, and a chunk that fails as a whole marks every address in it. The
+%% batch endpoint needs a paid plan: without a key every address in a request of
+%% two or more carries an `unauthorized' error, and a free-plan key's request of
+%% two or more a `bad_request' (HTTP 402). A request of one address is answered
+%% as its lookup would be.
+%% Erlang maps have no insertion order, so the result is a set of keys rather
+%% than a sequence. An address given as a tuple is keyed by its text.
+%%
+%% `concurrency', `retries' and `timeout_ms' are overridable here, per call, so
+%% one large batch does not need a second client built to widen it. There is no
+%% cap on how many addresses one call takes; chunking them is this function's job.
+-spec lookup_batch(client(), [address()], batch_options()) ->
+    #{binary() => {ok, internetdata_result:result()} | {error, internetdata_error:error()}}.
+lookup_batch(Client, Ips, Options) ->
+    Asked = lists:uniq([address(Ip) || Ip <- Ips]),
+    %% An IPv4-mapped address is sent as the address it carries, once however
+    %% many of its spellings were asked, and answered under each one asked.
+    Unique = lists:uniq([internetdata_bogon:unmapped(Ip) || Ip <- Asked]),
+    case {maps:get(concurrency, Options, maps:get(concurrency, Client)), check_options(Options)} of
+        %% A timeout no attempt can meet, or retries that are no count, fail every
+        %% address the same way, before any request.
+        {_, {error, Error}} ->
+            maps:from_list([{Ip, {error, Error}} || Ip <- Asked]);
+        {Concurrency, ok} when is_integer(Concurrency), Concurrency >= 1 ->
+            Answers = batch(Client, Unique, Options, Concurrency),
+            maps:from_list([{Ip, maps:get(internetdata_bogon:unmapped(Ip), Answers)} || Ip <- Asked]);
+        %% A dispatcher that may run nothing waits for ever, so this is the
+        %% caller's mistake to hear about at once.
+        {Refused, ok} ->
+            Message = iolist_to_binary(io_lib:format("concurrency must be at least 1, not ~p", [Refused])),
+            Error = #{kind => bad_request, retryable => false, message => Message},
+            maps:from_list([{Ip, {error, Error}} || Ip <- Asked])
+    end.
 
 %% @doc Every format a database file is published in: the values `format()' takes,
 %% for checking one that came from a flag or a config file.
@@ -575,6 +817,186 @@ io_error(Path, Reason) ->
 message(Path, Reason) ->
     iolist_to_binary([Path, ": ", file:format_error(Reason)]).
 
+%% Without a cache nothing is shared, since every lookup is then served.
+served(#{cache := undefined} = Client, Addr, Options) ->
+    fetch(Client, Addr, Options);
+served(#{cache := Cache} = Client, Addr, Options) ->
+    case internetdata_cache:get(Cache, Addr) of
+        {ok, Result} -> {ok, Result};
+        miss -> shared(Client, Cache, Addr, Options)
+    end.
+
+%% Concurrent misses for one address share one request, a lookup's or the batch
+%% chunk carrying it: the first to board the address leads, under its own
+%% options, and every other caller awaits its answer. A leader that dies before
+%% answering sends its waiters back to ask again rather than failing them.
+shared(Client, Cache, Addr, Options) ->
+    Ref = make_ref(),
+    case internetdata_cache:board(Cache, [Addr], Ref) of
+        [{Addr, {ok, Result}}] ->
+            {ok, Result};
+        [{Addr, lead}] ->
+            Answer = leading(Cache, [Addr], fun() -> fetch(Client, Addr, Options) end),
+            %% Errors are never cached: a 500 or a rate limit says nothing about the address.
+            internetdata_cache:land(Cache, [{Addr, Answer}]),
+            Answer;
+        [{Addr, wait}] ->
+            case internetdata_cache:await(Cache, Ref, [Addr]) of
+                #{Addr := retry} -> shared(Client, Cache, Addr, Options);
+                #{Addr := Answer} -> Answer
+            end
+    end.
+
+%% Runs a leader's requests, taking what it leads off the board if they raise,
+%% so a caller that catches the exception cannot leave its waiters hanging.
+leading(Cache, Led, Send) ->
+    try
+        Send()
+    catch
+        Class:Reason:Stack ->
+            internetdata_cache:abandon(Cache, Led),
+            erlang:raise(Class, Reason, Stack)
+    end.
+
+fetch(Client, Addr, Options) ->
+    Path = <<"/", (internetdata_http:escape(Addr))/binary>>,
+    Retries = maps:get(retries, Options, maps:get(retries, Client)),
+    case internetdata_http:get_json(bound(Client, Options), Path, [], Retries, ?LOOKUP) of
+        {ok, Body} -> {ok, internetdata_result:from_wire(Body)};
+        {error, Error} -> {error, Error}
+    end.
+
+cached(#{cache := undefined}, _Addr) ->
+    miss;
+cached(#{cache := Cache}, Addr) ->
+    internetdata_cache:get(Cache, Addr).
+
+batch(Client, Unique, Options, Concurrency) ->
+    {Answered, Pending} = lists:foldl(fun(Ip, {Acc, Rest}) ->
+        case local(Client, Ip) of
+            {ok, Result} -> {Acc#{Ip => {ok, Result}}, Rest};
+            miss -> {Acc, [Ip | Rest]}
+        end
+    end, {#{}, []}, Unique),
+    maps:merge(Answered, rounds(Client, lists:reverse(Pending), Options, Concurrency, #{})).
+
+%% Every address the batch must ask is boarded BEFORE its chunks are built: the
+%% ones it leads are sent, landing chunk by chunk, so a lookup arriving meanwhile
+%% awaits the chunk carrying its address; the ones a lookup already has in the
+%% air are awaited rather than sent again. An address whose leader died is
+%% boarded again in the next round.
+rounds(_Client, [], _Options, _Concurrency, Acc) ->
+    Acc;
+rounds(#{cache := undefined} = Client, Ips, Options, Concurrency, Acc) ->
+    maps:merge(Acc, send(Client, Ips, Options, Concurrency, fun(_Chunk, _Answers) -> ok end));
+rounds(#{cache := Cache} = Client, Ips, Options, Concurrency, Acc) ->
+    Ref = make_ref(),
+    Boarded = internetdata_cache:board(Cache, Ips, Ref),
+    Hits = maps:from_list([{Ip, Hit} || {Ip, {ok, _} = Hit} <- Boarded]),
+    Led = [Ip || {Ip, lead} <- Boarded],
+    Land = fun(Chunk, Answers) ->
+        internetdata_cache:land(Cache, [{Ip, maps:get(Ip, Answers)} || Ip <- Chunk])
+    end,
+    Sent = leading(Cache, Led, fun() -> send(Client, Led, Options, Concurrency, Land) end),
+    Awaited = internetdata_cache:await(Cache, Ref, [Ip || {Ip, wait} <- Boarded]),
+    {Again, Answers} = maps:fold(fun
+        (Ip, retry, {A, D}) -> {[Ip | A], D};
+        (Ip, Answer, {A, D}) -> {A, D#{Ip => Answer}}
+    end, {[], #{}}, Awaited),
+    rounds(Client, lists:reverse(Again), Options, Concurrency,
+           maps:merge(maps:merge(maps:merge(Acc, Hits), Sent), Answers)).
+
+%% The addresses sent as chunks, each chunk handed to `Land' as it completes.
+send(Client, Ips, Options, Concurrency, Land) ->
+    ByChunk = dispatch(fun(Chunk) -> lookup_chunk(Client, Chunk, Options) end, Land,
+                       chunk(Ips, ?BATCH_MAX), Concurrency, #{}, #{}, #{}),
+    maps:fold(fun(_Chunk, Answers, Acc) -> maps:merge(Acc, Answers) end, #{}, ByChunk).
+
+%% Bounded fan-out. At most `Limit' workers are alive at any moment, so the
+%% concurrency setting is the number of requests actually in flight rather than
+%% a hint. spawn_monitor rather than spawn, rather than waiting on results alone,
+%% so a worker that dies without answering cannot hang the batch.
+dispatch(Fun, Land, [Item | Rest], Limit, Pending, Done, Acc) when map_size(Pending) < Limit ->
+    Parent = self(),
+    {Pid, _Mon} = spawn_monitor(fun() -> Parent ! {?BATCH_TAG, self(), Fun(Item)} end),
+    dispatch(Fun, Land, Rest, Limit, Pending#{Pid => Item}, Done, Acc);
+dispatch(_Fun, _Land, [], _Limit, Pending, _Done, Acc) when map_size(Pending) =:= 0 ->
+    Acc;
+dispatch(Fun, Land, Queue, Limit, Pending, Done, Acc) ->
+    receive
+        {?BATCH_TAG, Pid, Result} ->
+            dispatch(Fun, Land, Queue, Limit, Pending, Done#{Pid => Result}, Acc);
+        %% Only a worker's: the caller's own monitors are not this batch's to consume.
+        {'DOWN', _Mon, process, Pid, Reason} when is_map_key(Pid, Pending) ->
+            %% Signals between a pair of processes keep their order, so a result
+            %% sent before the worker exited is already in Done by now.
+            Item = maps:get(Pid, Pending),
+            Answers = case maps:find(Pid, Done) of
+                {ok, Result} -> Result;
+                error -> maps:from_list([{Ip, {error, worker_died(Reason)}} || Ip <- Item])
+            end,
+            Land(Item, Answers),
+            dispatch(Fun, Land, Queue, Limit, maps:remove(Pid, Pending), maps:remove(Pid, Done),
+                     Acc#{Item => Answers})
+    end.
+
+worker_died(Reason) ->
+    #{kind => network, retryable => false,
+      message => iolist_to_binary(io_lib:format("lookup worker exited: ~p", [Reason]))}.
+
+%% A bogon or a cached answer costs no request; `miss' is what goes to the API.
+local(Client, Ip) ->
+    case internetdata_bogon:is_bogon(Ip) of
+        true -> {ok, internetdata_result:bogon(Ip)};
+        false -> cached(Client, Ip)
+    end.
+
+chunk([], _Size) ->
+    [];
+chunk(List, Size) when length(List) =< Size ->
+    [List];
+chunk(List, Size) ->
+    {Head, Tail} = lists:split(Size, List),
+    [Head | chunk(Tail, Size)].
+
+%% One POST /batch, mapped back onto the addresses it was asked about. A
+%% chunk-level failure - the call refused, the transport failing, the retries
+%% exhausted - becomes every address's error, exactly as it would have been had
+%% each been looked up alone.
+lookup_chunk(Client, Chunk, Options) ->
+    Retries = maps:get(retries, Options, maps:get(retries, Client)),
+    Body = iolist_to_binary(json:encode(#{<<"ips">> => Chunk})),
+    case internetdata_http:post_json(bound(Client, Options), <<"/batch">>, Body, Retries, chunk) of
+        {ok, Answer} ->
+            Results = object(maps:get(<<"results">>, Answer, #{})),
+            Errors = object(maps:get(<<"errors">>, Answer, #{})),
+            maps:from_list([{Ip, batch_answer(Ip, Results, Errors)} || Ip <- Chunk]);
+        {error, Error} ->
+            maps:from_list([{Ip, {error, Error}} || Ip <- Chunk])
+    end.
+
+object(Value) when is_map(Value) -> Value;
+object(_) -> #{}.
+
+%% Every address lands in exactly one of `results' and `errors'; an address in
+%% neither is the server breaking its own contract, and is reported as such
+%% rather than lost.
+batch_answer(Ip, Results, Errors) ->
+    case {Results, Errors} of
+        {#{Ip := Served}, _} when is_map(Served) ->
+            case internetdata_http:conforms(lookup_shape(), Served) of
+                ok -> {ok, internetdata_result:from_wire(Served)};
+                {error, Message} ->
+                    {error, #{kind => server_error, retryable => false, status => 200, message => Message}}
+            end;
+        {_, #{Ip := #{<<"status">> := Status, <<"error">> := Message}}}
+          when is_integer(Status), is_binary(Message) ->
+            {error, internetdata_error:from_entry(Status, Message)};
+        _ ->
+            {error, #{kind => server_error, retryable => false, status => 200,
+                      message => <<"the batch answer did not include ", Ip/binary>>}}
+    end.
+
 get_json(Client, Path, Query, Member) ->
     internetdata_http:get_json(Client, Path, Query, maps:get(retries, Client), Member).
 
@@ -619,6 +1041,138 @@ download() ->
               {<<"client_ip">>, string, false}, {<<"user_agent">>, string, false},
               {<<"created">>, date_time, true}]}.
 
+%% The lookup answers' shapes, by the same rule. A detail is `{}' under a false
+%% flag, and the spec requires none of its members; a plan's own members are
+%% optional within the objects every answer carries, which are always whole.
+lookup_shape() ->
+    Class = {object, [{<<"provider">>, string, false}, {<<"provider_name">>, string, false},
+                      {<<"confidence">>, string, false}, {<<"last_seen">>, string, false}]},
+    Proxy = {object, [{<<"provider">>, string, false}, {<<"provider_name">>, string, false},
+                      {<<"first_seen">>, string, false}, {<<"last_seen">>, string, false},
+                      {<<"hits">>, integer, false}, {<<"hits_days_pct">>, integer, false},
+                      {<<"providers_num">>, integer, false}]},
+    Pubproxy = {object, [{<<"entry">>, boolean, false}, {<<"exit">>, boolean, false},
+                         {<<"protocols">>, {list, string}, false}, {<<"num_ports">>, integer, false},
+                         {<<"num_proxies">>, integer, false}, {<<"last_seen">>, string, false},
+                         {<<"last_usable">>, string, false}]},
+    Carrier = {object, [{<<"name">>, string, false}, {<<"mcc">>, string, false}, {<<"mnc">>, string, false},
+                        {<<"country">>, string, false}, {<<"confidence">>, string, false}]},
+    Satellite = {object, [{<<"provider">>, string, false}, {<<"provider_name">>, string, false},
+                          {<<"orbit">>, string, false}, {<<"segment">>, string, false},
+                          {<<"country">>, string, false}, {<<"asn">>, integer, false},
+                          {<<"confidence">>, string, false}]},
+    Ssh = {object, [{<<"port">>, integer, false}, {<<"banner">>, string, false},
+                    {<<"host_key_fp">>, string, false}, {<<"session_ok">>, boolean, false},
+                    {<<"first_seen">>, string, false}, {<<"last_seen">>, string, false}]},
+    Smtp = {object, [{<<"port">>, integer, false}, {<<"banner">>, string, false},
+                     {<<"session_ok">>, boolean, false}, {<<"first_seen">>, string, false},
+                     {<<"last_seen">>, string, false}]},
+    Web = {object, [{<<"port">>, integer, true}, {<<"tls_ok">>, boolean, true},
+                    {<<"session_ok">>, boolean, true}, {<<"status_code">>, integer, true},
+                    {<<"server">>, string, true}, {<<"location">>, string, true},
+                    {<<"title">>, string, true}, {<<"cert_subject_cn">>, string, true},
+                    {<<"cert_subject_o">>, string, true}, {<<"cert_issuer_dn">>, string, true},
+                    {<<"cert_browser_trusted">>, boolean, true}, {<<"tls_version">>, string, true},
+                    {<<"first_seen">>, string, true}, {<<"last_seen">>, string, true}]},
+    DnsResolver = {object, [{<<"port">>, integer, false}, {<<"recursion_available">>, boolean, false},
+                            {<<"rcode">>, integer, false}, {<<"answer_correct">>, boolean, false},
+                            {<<"first_seen">>, string, false}, {<<"last_seen">>, string, false}]},
+    BitTorrent = {object, [{<<"verified">>, boolean, false}, {<<"id_matches_ip">>, boolean, false},
+                           {<<"first_seen">>, string, false}, {<<"last_seen">>, string, false},
+                           {<<"last_reachable">>, string, false}, {<<"days_seen">>, integer, false},
+                           {<<"num_ports">>, integer, false}, {<<"peak_num_ports">>, integer, false},
+                           {<<"indexer">>, boolean, false}, {<<"clients">>, {list, string}, false}]},
+    Location = {object, [{<<"continent">>, string, true}, {<<"continent_name">>, string, true},
+                         {<<"country">>, string, true}, {<<"country_name">>, string, true},
+                         {<<"timezone">>, string, true}, {<<"currency_code">>, string, true},
+                         {<<"currency_name">>, string, true}, {<<"currency_symbol">>, string, true},
+                         {<<"flag_emoji">>, string, true}, {<<"flag_unicode">>, string, true},
+                         {<<"region">>, string, false}, {<<"region_code">>, string, false},
+                         {<<"city">>, string, false}, {<<"postal_code">>, string, false},
+                         {<<"latitude">>, number, false}, {<<"longitude">>, number, false},
+                         {<<"accuracy_radius">>, integer, false}, {<<"geoname_id">>, string, false},
+                         {<<"dma_code">>, string, false}, {<<"last_changed">>, string, false}]},
+    Asn = {object, [{<<"asn">>, integer, true}, {<<"name">>, string, true}, {<<"domain">>, string, true},
+                    {<<"type">>, string, true}, {<<"prefix">>, string, true},
+                    {<<"country">>, string, false}, {<<"rpki_status">>, string, false}]},
+    Company = {object, [{<<"name">>, string, true}, {<<"domain">>, string, true},
+                        {<<"type">>, string, false}, {<<"country">>, string, false}]},
+    Abuse = {object, [{<<"email">>, string, true}, {<<"name">>, string, false},
+                      {<<"phone">>, string, false}, {<<"address">>, string, false},
+                      {<<"country">>, string, false}, {<<"network">>, string, false},
+                      {<<"validated">>, boolean, false}, {<<"unvalidated_since">>, string, false}]},
+    Whois = {object, [{<<"id">>, string, true}, {<<"name">>, string, true}, {<<"org">>, string, true},
+                      {<<"country">>, string, true}, {<<"status">>, string, true},
+                      {<<"source">>, string, true}, {<<"domain">>, string, true},
+                      {<<"abuse_email">>, string, true}, {<<"asn">>, integer, true}]},
+    Rwhois = {object, [{<<"id">>, string, true}, {<<"name">>, string, true}, {<<"country">>, string, true},
+                       {<<"source">>, string, true}, {<<"domain">>, string, true},
+                       {<<"abuse_email">>, string, true}]},
+    Hosted = {object, [{<<"total">>, integer, true}]},
+    {object, [{<<"ip">>, string, true}, {<<"is_bogon">>, boolean, true}, {<<"is_vpn">>, boolean, false},
+              {<<"is_tor">>, boolean, true}, {<<"is_relay">>, boolean, true},
+              {<<"is_resproxy">>, boolean, false}, {<<"is_dcproxy">>, boolean, false},
+              {<<"is_mobproxy">>, boolean, false}, {<<"is_pubproxy">>, boolean, false},
+              {<<"is_hosting">>, boolean, false}, {<<"is_cdn">>, boolean, false},
+              {<<"is_anycast">>, boolean, true}, {<<"is_carrier">>, boolean, true},
+              {<<"is_satellite">>, boolean, true}, {<<"is_ssh">>, boolean, true},
+              {<<"is_smtp">>, boolean, true}, {<<"is_web">>, boolean, true},
+              {<<"is_dns_resolver">>, boolean, true}, {<<"is_bittorrent">>, boolean, true},
+              {<<"vpn">>, Class, false}, {<<"tor">>, Class, true}, {<<"relay">>, Class, true},
+              {<<"resproxy">>, Proxy, false}, {<<"dcproxy">>, Proxy, false}, {<<"mobproxy">>, Proxy, false},
+              {<<"pubproxy">>, Pubproxy, false}, {<<"hosting">>, Class, false}, {<<"cdn">>, Class, false},
+              {<<"carrier">>, Carrier, false}, {<<"satellite">>, Satellite, false}, {<<"ssh">>, Ssh, false},
+              {<<"smtp">>, Smtp, false}, {<<"web">>, {list, Web}, false},
+              {<<"dns_resolver">>, DnsResolver, false}, {<<"bittorrent">>, BitTorrent, false},
+              {<<"location">>, Location, true}, {<<"asn">>, Asn, true}, {<<"company">>, Company, true},
+              {<<"hostname">>, string, true}, {<<"abuse">>, Abuse, true}, {<<"whois">>, Whois, false},
+              {<<"rwhois">>, Rwhois, false}, {<<"hosted_domains">>, Hosted, false},
+              {<<"trial_expired">>, boolean, false}]}.
+
+asn_shape() ->
+    Prefix = {object, [{<<"prefix">>, string, true}, {<<"peer_count">>, integer, true},
+                       {<<"rpki_status">>, string, true}, {<<"first_seen">>, string, true},
+                       {<<"country">>, string, true}, {<<"size">>, integer, true},
+                       {<<"other_origins">>, {list, integer}, true}]},
+    {object, [{<<"asn">>, integer, true}, {<<"name">>, string, true}, {<<"country">>, string, true},
+              {<<"registry">>, string, true}, {<<"allocated">>, string, true}, {<<"domain">>, string, true},
+              {<<"type">>, string, false}, {<<"num_ips">>, integer, false},
+              {<<"num_prefixes4">>, integer, false}, {<<"num_prefixes6">>, integer, false},
+              {<<"rpki_valid">>, integer, false}, {<<"rpki_invalid">>, integer, false},
+              {<<"rpki_not_found">>, integer, false}, {<<"whois">>, {map_of, string}, false},
+              {<<"prefixes">>, {list, Prefix}, false}, {<<"trial_expired">>, boolean, false}]}.
+
+domain_shape() ->
+    Address = {object, [{<<"ip">>, string, true}, {<<"last_seen">>, string, true}]},
+    Mx = {object, [{<<"priority">>, integer, true}, {<<"host">>, string, true},
+                   {<<"last_seen">>, string, true}]},
+    Ns = {object, [{<<"host">>, string, true}, {<<"last_seen">>, string, true}]},
+    Cname = {object, [{<<"target">>, string, true}, {<<"last_seen">>, string, true}]},
+    Dns = {object, [{<<"a">>, {list, Address}, true}, {<<"aaaa">>, {list, Address}, true},
+                    {<<"mx">>, {list, Mx}, true}, {<<"ns">>, {list, Ns}, true},
+                    {<<"cname">>, {list, Cname}, true}]},
+    Range = {object, [{<<"range">>, string, true}, {<<"name">>, string, true}, {<<"country">>, string, true}]},
+    Ranges = {object, [{<<"domain">>, string, true}, {<<"redirects_to">>, string, true},
+                       {<<"total">>, integer, true}, {<<"ipv4">>, integer, true},
+                       {<<"ranges">>, {list, Range}, true}]},
+    Disposable = {object, [{<<"confidence">>, string, false}, {<<"providers">>, {list, string}, false},
+                           {<<"first_seen">>, string, false}, {<<"last_seen">>, string, false}]},
+    {object, [{<<"domain">>, string, true}, {<<"is_registered">>, boolean, true},
+              {<<"is_disposable">>, boolean, false}, {<<"has_a">>, boolean, true},
+              {<<"has_aaaa">>, boolean, true}, {<<"has_mx">>, boolean, true}, {<<"has_ns">>, boolean, true},
+              {<<"has_cname">>, boolean, true}, {<<"dns">>, Dns, false}, {<<"ip_ranges">>, Ranges, false},
+              {<<"disposable">>, Disposable, false}, {<<"trial_expired">>, boolean, false}]}.
+
+entitlement_shape() ->
+    Apikey = {object, [{<<"id">>, string, true}, {<<"expires">>, date_time, false},
+                       {<<"allowed_cidrs">>, {list, string}, true}]},
+    Plan = {object, [{<<"key">>, string, true}, {<<"tier">>, string, true}]},
+    Usage = {object, [{<<"requests">>, integer, true}, {<<"quota">>, integer, true},
+                      {<<"hard_limit">>, integer, false}, {<<"window_start">>, date_time, true},
+                      {<<"window_end">>, date_time, true}]},
+    {object, [{<<"org_id">>, string, true}, {<<"apikey">>, Apikey, true}, {<<"plan">>, Plan, true},
+              {<<"usage">>, Usage, true}]}.
+
 %% The client with this call's `timeout_ms' in place of its own, which is the one
 %% the transport reads for every request it builds.
 bound(Client, Options) ->
@@ -656,15 +1210,36 @@ check_timeout(#{timeout_ms := TimeoutMs}) ->
         true ->
             ok;
         false ->
-            Message = io_lib:format("timeout_ms must be infinity or an integer from 1 to ~b, not ~p",
-                                    [?MAX_TIMEOUT_MS, TimeoutMs]),
-            {error, #{kind => bad_request, retryable => false, message => iolist_to_binary(Message)}}
+            refused(io_lib:format("timeout_ms must be infinity or an integer from 1 to ~b, not ~p",
+                                  [?MAX_TIMEOUT_MS, TimeoutMs]))
     end;
 check_timeout(_Options) ->
     ok.
 
+%% A lookup with a timeout no attempt can meet, or retries that are no count, is
+%% refused before any request: Erlang orders every atom above every number, so
+%% `infinity' retries would retry an outage for ever.
+checked(Options, Call) ->
+    case check_options(Options) of
+        ok -> Call();
+        {error, Error} -> {error, Error}
+    end.
+
+check_options(Options) ->
+    Retries = maps:get(retries, Options, 0),
+    case {check_timeout(Options), valid_retries(Retries)} of
+        {ok, true} -> ok;
+        {{error, Error}, _} -> {error, Error};
+        {ok, false} -> refused(io_lib:format("retries must be an integer of 0 or more, not ~p", [Retries]))
+    end.
+
+refused(Message) ->
+    {error, #{kind => bad_request, retryable => false, message => iolist_to_binary(Message)}}.
+
 valid_timeout(infinity) -> true;
 valid_timeout(Ms) -> is_integer(Ms) andalso Ms >= 1 andalso Ms =< ?MAX_TIMEOUT_MS.
+
+valid_retries(Retries) -> is_integer(Retries) andalso Retries >= 0.
 
 %% An unpublished format is refused here rather than sent, where it would cost a
 %% round trip and come back a 400 naming nothing the caller can act on.
@@ -678,6 +1253,13 @@ format_name(Format) ->
             {error, #{kind => bad_request, retryable => false,
                       message => iolist_to_binary(Message)}}
     end.
+
+cache(false) ->
+    undefined;
+cache(Options) ->
+    {ok, Cache} = internetdata_cache:start_link(maps:get(max, Options, ?DEFAULT_CACHE_MAX),
+                                                maps:get(ttl_ms, Options, ?DEFAULT_CACHE_TTL_MS)),
+    Cache.
 
 %% Blank counts as absent: it is what an unset `${{ secrets.X }}' interpolates
 %% to, and sent, `Bearer' with nothing after it reads as a wrong key rather than
@@ -729,3 +1311,25 @@ user_agent() ->
 
 bin(Value) when is_binary(Value) -> Value;
 bin(Value) when is_list(Value) -> list_to_binary(Value).
+
+%% The API answers an AS or a domain at an address's path, in a shape a lookup
+%% cannot read, so anything else is refused before it costs three requests.
+is_address(Addr) ->
+    case inet:parse_strict_address(binary_to_list(Addr)) of
+        {ok, _} -> true;
+        {error, _} -> false
+    end.
+
+not_an_address(Text) ->
+    refused(<<Text/binary, " is not an IP address; look an AS up with lookup_asn/2 and a domain with "
+              "lookup_domain/2">>).
+
+%% A tuple that is no address raises `badarg' naming it, as a malformed option
+%% does in `new/1'.
+address(Ip) when is_tuple(Ip) ->
+    case inet:ntoa(Ip) of
+        {error, einval} -> erlang:error({badarg, {ip, Ip}});
+        Text -> list_to_binary(Text)
+    end;
+address(Ip) ->
+    bin(Ip).

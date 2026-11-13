@@ -1,7 +1,7 @@
 %% @doc Why a request failed, and whether trying it again could ever help.
 -module(internetdata_error).
 
--export([from_response/3, from_transport/1, from_oauth/4, local_expiry/0]).
+-export([from_response/3, from_entry/2, from_transport/1, from_oauth/4, local_expiry/0]).
 
 -export_type([kind/0, error/0]).
 
@@ -43,6 +43,14 @@
 from_response(Status, Headers, Body) ->
     Message = message_of(Body, Status),
     classify(Status, retry_after(Headers), Message).
+
+%% @doc A per-entry failure inside a successful batch: the status the single
+%% lookup would have answered, and its message, with no headers at all - so a
+%% 429 here is a spent allowance, which is the only kind the API puts in an
+%% entry.
+-spec from_entry(100..599, binary()) -> error().
+from_entry(Status, Message) when is_integer(Status), is_binary(Message) ->
+    classify(Status, undefined, Message).
 
 %% @doc The authorization server refusing an OAuth request: the ordinary error for
 %% its status, plus the RFC 6749 `error' code, and never retryable, because every
@@ -103,18 +111,19 @@ classify(Status, _, Message) when Status < 500 ->
 classify(Status, _, Message) ->
     #{kind => server_error, message => Message, retryable => true, status => Status}.
 
-%% Every refusal this API writes carries a machine-readable `rc'. It is reported
-%% verbatim rather than rewritten, because it is what separates "never bought
-%% this" from "your term lapsed" without a support ticket, and the spec declares
-%% it deliberately open so a code added later stays readable by a client written
-%% today.
-%% An empty one says nothing, so it gives way to the status as any other
-%% envelope that names no code does.
+%% The two APIs behind this host answer with different envelopes: the lookup
+%% endpoints use `error', the database endpoints a machine-readable `rc', which
+%% separates "never bought this" from "your term lapsed" without a support
+%% ticket. Both are read here, verbatim, so a caller never has to know which one
+%% they hit, and the first that says something is the message: an empty one says
+%% nothing, so `{"error": "", "rc": "NOT_LICENSED"}' reads as NOT_LICENSED.
 message_of(Body, Status) ->
     Decoded = try json:decode(Body) catch _:_ -> #{} end,
-    case Decoded of
-        #{<<"rc">> := Rc} when is_binary(Rc), Rc =/= <<>> -> Rc;
-        _ -> iolist_to_binary(io_lib:format("request failed with status ~b", [Status]))
+    Said = [Value || is_map(Decoded), Key <- [<<"error">>, <<"rc">>],
+                     Value <- [maps:get(Key, Decoded, undefined)], is_binary(Value), Value =/= <<>>],
+    case Said of
+        [Message | _] -> Message;
+        [] -> iolist_to_binary(io_lib:format("request failed with status ~b", [Status]))
     end.
 
 retry_after(Headers) ->
