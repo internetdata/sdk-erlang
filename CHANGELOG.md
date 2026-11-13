@@ -2,6 +2,13 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.13.0 - 2026-11-13
+
+### Features
+
+- Default to https://api.internetdata.io, signing in at its apex ([`f3f031d`](https://github.com/internetdata/sdk-erlang/commit/f3f031d3cfe762a48a5e3fba4e7dcecab05dac51))
+- Look up addresses, ASes and domains: lookup, lookup_batch, lookup_asn and lookup_domain ([`3868d8b`](https://github.com/internetdata/sdk-erlang/commit/3868d8b062a1e60e3531f6da9bdf1c1131a30e7b))
+
 ## 1.12.1 - 2026-11-09
 
 ### Fixes

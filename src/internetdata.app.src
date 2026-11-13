@@ -1,7 +1,7 @@
 {application, internetdata,
  [{description, "Official Erlang client for the InternetData API: look up an IP address, an AS "
                 "or a domain, and download the licensed IP and ASN datasets"},
-  {vsn, "1.12.1"},
+  {vsn, "1.13.0"},
   {registered, []},
   {applications, [kernel, stdlib, inets, ssl, public_key, crypto]},
   {env, []},
