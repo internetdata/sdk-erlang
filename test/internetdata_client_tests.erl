@@ -1237,6 +1237,26 @@ a_per_call_timeout_below_the_clients_is_the_one_that_fires_test_() ->
         internetdata_origin:stop(Origin)
     end}.
 
+%% Duplicates, and the spellings of one IPv4-mapped address, collapse before
+%% anything is sent, so each address rides in its chunk once.
+a_batch_sends_each_address_once_test() ->
+    Stub = internetdata_stub:start(routes([<<"1.1.1.1">>, <<"8.8.8.8">>])),
+    Http = internetdata_stub:http(Stub),
+    Parent = self(),
+    Recording = fun(Request) ->
+        Parent ! {sent_ips, maps:get(<<"ips">>, json:decode(maps:get(body, Request)))},
+        Http(Request)
+    end,
+    Client = internetdata:new(#{http => Recording, cache => false}),
+
+    Got = internetdata:lookup_batch(Client, [<<"1.1.1.1">>, <<"8.8.8.8">>, <<"1.1.1.1">>, <<"::ffff:1.1.1.1">>,
+                                             {1, 1, 1, 1}]),
+
+    ?assertEqual([<<"1.1.1.1">>, <<"8.8.8.8">>], lists:sort(receive {sent_ips, Ips} -> Ips after 1000 -> none end)),
+    ?assertEqual([<<"1.1.1.1">>, <<"8.8.8.8">>, <<"::ffff:1.1.1.1">>], lists:sort(maps:keys(Got))),
+    ?assertEqual(1, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
 %% No cap on what one call accepts: chunking to the endpoint's 1000 is the
 %% client's job, so 2,500 addresses are three requests rather than an error.
 a_batch_of_2500_addresses_is_three_requests_and_one_answer_each_test() ->
