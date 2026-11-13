@@ -1,10 +1,11 @@
 %% Where the integration suite points and what it needs to get there.
 -module(staging).
 
--export([base_url/0, key/0, skip_reason/0, client/0, notice/1, staged/1]).
+-export([base_url/0, apex/0, prod/0, key/0, skip_reason/0, client/0, notice/1, staged/1, installed/0]).
 
 -define(SECRET, "INTERNETDATA_STAGING_KEY").
--define(DEFAULT_URL, "https://staging.internetdata.io").
+-define(DEFAULT_URL, "https://api-staging.internetdata.io").
+-define(PROD, <<"https://api.internetdata.io">>).
 
 %% @doc The API to run against. Overridable so the same suite can be pointed at
 %% another environment without a code change.
@@ -14,6 +15,29 @@ base_url() ->
         "" -> list_to_binary(?DEFAULT_URL);
         Url -> list_to_binary(Url)
     end.
+
+%% @doc Where the authorization server is for {@link base_url/0}: the apex the API
+%% host sits under, `api-<env>.' becoming `<env>.', and any other URL as given.
+-spec apex() -> binary().
+apex() ->
+    Url = base_url(),
+    case re:run(Url, <<"^(https?://)api(-[a-z0-9-]+)?[.](.+)$">>, [caseless, {capture, all_but_first, binary}]) of
+        {match, [Scheme, <<>>, Rest]} -> <<Scheme/binary, Rest/binary>>;
+        {match, [Scheme, <<"-", Env/binary>>, Rest]} -> <<Scheme/binary, Env/binary, ".", Rest/binary>>;
+        nomatch -> Url
+    end.
+
+%% @doc Production's API host, for the checks that need no key.
+-spec prod() -> binary().
+prod() ->
+    ?PROD.
+
+%% @doc The installed package's version, as a list of integers to compare.
+-spec installed() -> [non_neg_integer()].
+installed() ->
+    _ = application:load(internetdata),
+    {ok, Vsn} = application:get_key(internetdata, vsn),
+    [list_to_integer(Part) || Part <- string:tokens(Vsn, ".")].
 
 %% @doc The key, or `undefined' when there is none to present.
 %%

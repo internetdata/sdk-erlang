@@ -9,14 +9,16 @@
 %% The one client ID the server holds, already public in the CLI's source.
 -define(CLIENT_ID, <<"internetdata-cli">>).
 -define(SINCE, [1, 6, 0]).
+%% From here a client built on the API host signs in at the apex by itself.
+-define(APEX_DERIVED, [1, 13, 0]).
 %% Where staging sends a person to approve a device sign-in.
 -define(STAGING_CONSOLE, "https://app-staging.internetdata.io").
 
-metadata_names_the_host_it_was_asked_on_test_() ->
+metadata_names_the_apex_as_its_issuer_test_() ->
     since(fun(Client) ->
         {ok, Metadata} = internetdata:oauth_metadata(Client),
 
-        ?assertEqual(staging:base_url(), maps:get(issuer, Metadata)),
+        ?assertEqual(staging:apex(), maps:get(issuer, Metadata)),
         ?assert(maps:is_key(device_authorization_endpoint, Metadata)),
         ?assert(lists:member(<<"S256">>, maps:get(code_challenge_methods_supported, Metadata)))
     end).
@@ -55,18 +57,18 @@ one_device_authorization_starts_a_sign_in_test_() ->
     end).
 
 %% Gated on the INSTALLED version rather than on whether the function exists,
-%% which would also skip quietly if one were ever removed.
+%% which would also skip quietly if one were ever removed. Before 1.13.0 a client
+%% signed in wherever its base URL pointed, so those releases are given the apex.
 since(Body) ->
     {timeout, 60, fun() ->
-        _ = application:load(internetdata),
-        {ok, Vsn} = application:get_key(internetdata, vsn),
-        Installed = [list_to_integer(Part) || Part <- string:tokens(Vsn, ".")],
+        Installed = staging:installed(),
         case Installed >= ?SINCE of
+            true when Installed >= ?APEX_DERIVED ->
+                Body(internetdata:new(#{base_url => staging:base_url()}));
             true ->
-                Client = internetdata:new(#{base_url => staging:base_url()}),
-                Body(Client);
+                Body(internetdata:new(#{base_url => staging:apex()}));
             false ->
-                staging:notice("SKIPPED: the oauth functions arrived in 1.6.0, and " ++ Vsn
-                               ++ " is installed")
+                staging:notice("SKIPPED: the oauth functions arrived in 1.6.0, and an older release "
+                               "is installed")
         end
     end}.
