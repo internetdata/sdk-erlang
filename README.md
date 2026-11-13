@@ -56,7 +56,7 @@ maps:get(name, As).                              % <<"M247 Europe SRL">>
 maps:get(has_mx, Domain).                        % whether it has an MX record
 ```
 
-Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record and the prefixes it announces, and the domain's records, its organization's IP ranges and whether it is disposable. Neither answer is cached, and both calls take the options `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries.
+Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record and the prefixes it announces, and the domain's records, its organization's IP ranges and whether it is disposable. Neither answer is cached, and both calls take the options `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries. `lookup` takes addresses alone, and answers anything else `bad_request` without sending it.
 
 ### Your own address
 
