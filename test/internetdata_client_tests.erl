@@ -1090,9 +1090,9 @@ a_lookup_refuses_text_that_is_no_ip_address_before_sending_it_test() ->
 
     [begin
          {error, #{kind := Kind, retryable := Retryable, message := Message}} = internetdata:lookup(Client, Text),
-         ?assertEqual({Text, bad_request, false}, {Text, Kind, Retryable}),
-         ?assertNotEqual({Text, nomatch}, {Text, binary:match(Message, <<"lookup_asn/2">>)}),
-         ?assertNotEqual({Text, nomatch}, {Text, binary:match(Message, <<"lookup_domain/2">>)})
+         Said = iolist_to_binary(["'", Text, "' is not an IP address: look up an AS with lookup_asn, and a domain "
+                                  "with lookup_domain"]),
+         ?assertEqual({Text, bad_request, false, Said}, {Text, Kind, Retryable, Message})
      end || Text <- [<<"example.com">>, <<"AS9009">>, <<"9009">>, "9009", <<>>, <<"1.2.3">>, <<"8.8.8.888">>,
                      <<"1.1.1.1/24">>, <<" 1.1.1.1">>, <<"notanip">>, <<255, 0>>]],
     ?assertEqual(0, internetdata_stub:calls(Stub)),

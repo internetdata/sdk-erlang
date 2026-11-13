@@ -197,8 +197,8 @@ lookup(Client, Ip) ->
 %% `Ip' is text, or a tuple as `inet:peername/1' and Cowboy's `peer' give it. A
 %% bogon is answered locally and never reaches the network. Everything else is
 %% served, then cached for this client alone. Text that is no IP address is a
-%% `bad_request' with nothing sent: {@link lookup_asn/2} and
-%% {@link lookup_domain/2} look an AS and a domain up.
+%% `bad_request' with nothing sent, and its message names {@link lookup_asn/2}
+%% and {@link lookup_domain/2}, which look an AS and a domain up.
 %%
 %% `Options' overrides the client's `retries' and `timeout_ms' for this call
 %% alone. `timeout_ms' bounds each attempt, so a retried call can take longer in
@@ -1321,8 +1321,8 @@ is_address(Addr) ->
     end.
 
 not_an_address(Text) ->
-    refused(<<Text/binary, " is not an IP address; look an AS up with lookup_asn/2 and a domain with "
-              "lookup_domain/2">>).
+    refused(<<"'", Text/binary, "' is not an IP address: look up an AS with lookup_asn, and a domain with "
+              "lookup_domain">>).
 
 %% A tuple that is no address raises `badarg' naming it, as a malformed option
 %% does in `new/1'.
