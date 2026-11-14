@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.14.0 - 2026-11-14
+
+### Features
+
+- Add the framework middleware core ([`9c32d0d`](https://github.com/internetdata/sdk-erlang/commit/9c32d0d4ad4668b9ce380f96c708f2c1e2bb5f5b))
+
 ## 1.13.0 - 2026-11-13
 
 ### Features

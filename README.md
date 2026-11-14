@@ -14,7 +14,7 @@ It tells you what every database InternetData publishes says about an IP address
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.13"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.14"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
