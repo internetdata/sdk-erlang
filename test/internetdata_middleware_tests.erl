@@ -1,0 +1,346 @@
+%% The middleware half of the shared conformance corpus, which every framework
+%% middleware in every language asserts, plus the Erlang-specific parts of it.
+%%
+%% The framework-shaped half - a Cowboy middleware, the request view it builds -
+%% is asserted in the adapter against a real server. What is here is everything
+%% a framework cannot change.
+-module(internetdata_middleware_tests).
+
+-include_lib("eunit/include/eunit.hrl").
+
+-define(PUBLIC_IP, <<"45.83.91.1">>).
+
+%%% ---------------------------------------------------------------- the corpus
+
+corpus_conditions_test_() ->
+    [{binary_to_list(Name), fun() -> assert_condition(Case) end}
+     || #{<<"name">> := Name} = Case <- corpus(<<"conditions">>)].
+
+assert_condition(#{<<"condition">> := Condition, <<"expect">> := Expect, <<"why">> := Why} = Case) ->
+    {Ip, Routes} = fixture(Case),
+    Stub = internetdata_stub:start(Routes),
+    Warnings = collector(),
+    {ok, Core} = internetdata_middleware:new(#{
+        client => internetdata:new(#{http => internetdata_stub:http(Stub), cache => false,
+                                     retries => 0}),
+        ip_selector => fun(_View) -> Ip end,
+        block_condition => Condition,
+        on_warn => sink(Warnings)
+    }),
+
+    {ok, Found} = internetdata_middleware:evaluate(Core, view(undefined, #{})),
+
+    ?assertEqual({maps:get(<<"blocked">>, Expect), Why}, {maps:get(blocked, Found), Why}),
+    Missing = maps:get(<<"missing">>, Expect, []),
+    Reported = [W || W <- seen(Warnings), binary:match(W, <<"does not include">>) =/= nomatch],
+    ?assertEqual({min(length(Missing), 1), Why}, {length(Reported), Why}),
+    [?assertNotEqual({M, nomatch}, {M, binary:match(hd(Reported), M)}) || M <- Missing],
+    internetdata_stub:stop(Stub).
+
+corpus_refuses_a_condition_that_constrains_nothing_test_() ->
+    [{binary_to_list(Name),
+      ?_assertMatch(
+          {error, {constrains_nothing, _, _}},
+          internetdata_middleware:new(#{block_condition => Condition}))}
+     || #{<<"name">> := Name, <<"condition">> := Condition} <- corpus(<<"invalidConditions">>)].
+
+%%% --------------------------------------------------- what a framework cannot
+
+enriches_without_blocking_when_no_condition_is_configured_test() ->
+    {Stub, Core} = serving(#{<<"is_vpn">> => true}, #{ip_selector => fixed(?PUBLIC_IP)}),
+
+    {ok, Found} = internetdata_middleware:evaluate(Core, view(undefined, #{})),
+
+    ?assertEqual(false, maps:get(blocked, Found)),
+    ?assertEqual(?PUBLIC_IP, maps:get(ip, Found)),
+    ?assertEqual(true, maps:get(is_vpn, maps:get(result, Found))),
+    internetdata_stub:stop(Stub).
+
+%% An upper bound is met by a zero, so only it tells an absent member from its zero
+%% value: Unlimited's answer carries no latitude and no resproxy.
+an_upper_bound_on_a_member_the_answer_does_not_carry_never_matches_test() ->
+    Result = internetdata_result:from_wire(internetdata_stub:answer(?PUBLIC_IP)),
+    [?assertNot(internetdata_condition:matches(Condition, Result))
+     || Condition <- [#{location => #{latitude => #{lt => 90}}},
+                      #{resproxy => #{hits => #{lte => 7}}},
+                      #{is_hosting => [true, false]}]].
+
+a_condition_reaches_the_evidence_fields_test() ->
+    {Stub, Other} = serving(
+        #{<<"is_vpn">> => true, <<"vpn">> => #{<<"provider">> => <<"MULLVAD">>}},
+        #{ip_selector => fixed(?PUBLIC_IP),
+          block_condition => #{vpn => #{provider => <<"nordvpn">>}}}
+    ),
+    {ok, Missed} = internetdata_middleware:evaluate(Other, view(undefined, #{})),
+    ?assertEqual(false, maps:get(blocked, Missed)),
+    internetdata_stub:stop(Stub),
+
+    {Stub2, Cased} = serving(
+        #{<<"is_vpn">> => true, <<"vpn">> => #{<<"provider">> => <<"MULLVAD">>}},
+        #{ip_selector => fixed(?PUBLIC_IP),
+          block_condition => #{vpn => #{provider => <<"mullvad">>}}}
+    ),
+    {ok, Hit} = internetdata_middleware:evaluate(Cased, view(undefined, #{})),
+    ?assertEqual(true, maps:get(blocked, Hit)),
+    internetdata_stub:stop(Stub2).
+
+fails_open_on_a_lookup_error_and_closed_only_when_asked_test() ->
+    Routes = #{?PUBLIC_IP => #{status => 500, body => #{<<"error">> => <<"boom">>}}},
+
+    Stub = internetdata_stub:start(Routes),
+    {ok, Opened} = core(Stub, #{ip_selector => fixed(?PUBLIC_IP),
+                                block_condition => #{is_vpn => true}}),
+    {ok, Found} = internetdata_middleware:evaluate(Opened, view(undefined, #{})),
+    ?assertEqual(false, maps:get(blocked, Found)),
+    ?assertMatch(#{kind := server_error}, maps:get(error, Found)),
+    ?assertEqual(undefined, maps:get(result, Found)),
+
+    {ok, Closed} = core(Stub, #{ip_selector => fixed(?PUBLIC_IP),
+                                block_condition => #{is_vpn => true},
+                                fail_closed => true}),
+    {ok, Blocked} = internetdata_middleware:evaluate(Closed, view(undefined, #{})),
+    ?assertEqual(true, maps:get(blocked, Blocked)),
+    internetdata_stub:stop(Stub).
+
+a_private_client_address_warns_once_and_never_reaches_the_network_test() ->
+    Stub = internetdata_stub:start(#{}),
+    Warnings = collector(),
+    {ok, Core} = core(Stub, #{ip_selector => fixed(<<"10.0.0.7">>),
+                              block_condition => #{is_vpn => true},
+                              on_warn => sink(Warnings)}),
+
+    [begin
+         {ok, Found} = internetdata_middleware:evaluate(Core, view(undefined, #{})),
+         ?assertEqual(false, maps:get(blocked, Found)),
+         ?assertEqual(true, maps:get(is_bogon, maps:get(result, Found)))
+     end || _ <- [1, 2]],
+
+    ?assertEqual(0, internetdata_stub:calls(Stub)),
+    ?assertMatch([_], seen(Warnings)),
+    ?assertNotEqual(nomatch, binary:match(hd(seen(Warnings)), <<"not a public address">>)),
+    internetdata_stub:stop(Stub).
+
+%% A killed cache answers every read as a miss, so each request costs a lookup:
+%% through 3.8.0 nothing said so (a core built in `start/2' links its cache to the
+%% application master, which ignores the exit).
+a_dead_cache_warns_once_and_lookups_still_answer_test() ->
+    Stub = internetdata_stub:start(
+        #{?PUBLIC_IP => #{status => 200,
+                          body => (internetdata_stub:answer(?PUBLIC_IP))#{<<"is_vpn">> => true}}}
+    ),
+    Warnings = collector(),
+    %% The cache is linked to the process that built the client, as it is to the
+    %% application master, which traps exits and so outlives it.
+    Trapping = process_flag(trap_exit, true),
+    Client = internetdata:new(#{http => internetdata_stub:http(Stub), retries => 0}),
+    {ok, Core} = internetdata_middleware:new(#{client => Client, ip_selector => fixed(?PUBLIC_IP),
+                                               on_warn => sink(Warnings)}),
+    {ok, _} = internetdata_middleware:evaluate(Core, view(undefined, #{})),
+    ?assertEqual([], seen(Warnings)),
+
+    #{cache := #{pid := Cache}} = Client,
+    Monitor = erlang:monitor(process, Cache),
+    exit(Cache, kill),
+    receive {'DOWN', Monitor, process, Cache, _} -> ok end,
+
+    [begin
+         {ok, Found} = internetdata_middleware:evaluate(Core, view(undefined, #{})),
+         ?assertEqual(true, maps:get(is_vpn, maps:get(result, Found)))
+     end || _ <- [1, 2]],
+    ?assertEqual(3, internetdata_stub:calls(Stub)),
+    ?assertMatch([_], seen(Warnings)),
+    ?assertNotEqual(nomatch, binary:match(hd(seen(Warnings)), <<"result cache has stopped">>)),
+    receive {'EXIT', Cache, killed} -> ok after 0 -> ok end,
+    process_flag(trap_exit, Trapping),
+    internetdata_stub:stop(Stub).
+
+a_missing_member_warns_once_or_fails_on_request_test() ->
+    Warnings = collector(),
+    {Stub, Warned} = serving(#{<<"is_vpn">> => true},
+                             #{ip_selector => fixed(?PUBLIC_IP),
+                               block_condition => #{is_hosting => true},
+                               on_warn => sink(Warnings)}),
+    [internetdata_middleware:evaluate(Warned, view(undefined, #{})) || _ <- [1, 2]],
+    ?assertMatch([_], seen(Warnings)),
+    ?assertNotEqual(nomatch, binary:match(hd(seen(Warnings)), <<"is_hosting">>)),
+
+    {ok, Strict} = core(Stub, #{ip_selector => fixed(?PUBLIC_IP),
+                                block_condition => #{is_hosting => true},
+                                on_missing_field => error}),
+    ?assertMatch({error, {missing_members, [<<"is_hosting">>], _}},
+                 internetdata_middleware:evaluate(Strict, view(undefined, #{}))),
+    internetdata_stub:stop(Stub).
+
+an_unresolvable_address_warns_and_does_not_block_test() ->
+    Stub = internetdata_stub:start(#{}),
+    Warnings = collector(),
+    {ok, Core} = core(Stub, #{block_condition => #{is_vpn => true},
+                              on_warn => sink(Warnings)}),
+
+    {ok, Found} = internetdata_middleware:evaluate(Core, view(undefined, #{})),
+
+    ?assertEqual(false, maps:get(blocked, Found)),
+    ?assertMatch(#{kind := bad_request}, maps:get(error, Found)),
+    ?assertNotEqual(nomatch, binary:match(hd(seen(Warnings)),
+                                          <<"could not resolve a client address">>)),
+    internetdata_stub:stop(Stub).
+
+selectors_read_what_they_say_they_read_test() ->
+    Chained = view(<<"10.0.0.1">>,
+                   #{<<"x-forwarded-for">> => <<"203.0.113.9, 70.41.3.18, 150.172.238.178">>}),
+
+    ?assertEqual(<<"10.0.0.1">>, run(internetdata_selectors:framework_ip(), Chained)),
+    ?assertEqual(<<"203.0.113.9">>, run(internetdata_selectors:xff(0), Chained)),
+    ?assertEqual(<<"150.172.238.178">>, run(internetdata_selectors:xff(1), Chained)),
+    ?assertEqual(<<"70.41.3.18">>, run(internetdata_selectors:xff(2), Chained)),
+    %% Past the chain's length the depth is meaningless, so this falls back to
+    %% the left-most rather than indexing off the end.
+    ?assertEqual(<<"203.0.113.9">>, run(internetdata_selectors:xff(9), Chained)),
+    ?assertEqual(<<"10.0.0.1">>, run(internetdata_selectors:header(<<"CF-Connecting-IP">>),
+                                     Chained)),
+
+    Cloudflared = view(<<"10.0.0.1">>, #{<<"cf-connecting-ip">> => <<"198.51.100.4">>}),
+    ?assertEqual(<<"198.51.100.4">>,
+                 run(internetdata_selectors:header(<<"CF-Connecting-IP">>), Cloudflared)),
+    ?assertEqual(<<"10.0.0.1">>,
+                 run(internetdata_selectors:xff(0), view(<<"10.0.0.1">>, #{}))).
+
+%% A condition decoded from JSON carries binary keys and binary values, which is
+%% the shape an app whose policy lives in config gets for free.
+a_condition_from_json_reads_the_same_as_one_written_in_erlang_test() ->
+    Decoded = json:decode(<<"{\"is_vpn\":true,\"vpn\":{\"confidence\":[\"high\",\"medium\"]}}">>),
+    {Stub, _} = serving(#{}, #{}),
+    Client = internetdata:new(#{http => internetdata_stub:http(Stub), cache => false}),
+    Result = internetdata_result:from_wire(
+        (internetdata_stub:answer(?PUBLIC_IP))#{<<"is_vpn">> => true,
+                                                <<"vpn">> => #{<<"confidence">> => <<"HIGH">>}}),
+
+    ?assert(internetdata_condition:matches(Decoded, Result)),
+    ?assert(internetdata_condition:matches(
+        #{is_vpn => true, vpn => #{confidence => [<<"high">>, <<"medium">>]}}, Result)),
+    internetdata:close(Client),
+    internetdata_stub:stop(Stub).
+
+%%% ------------------------------------------------------------------- helpers
+
+fixture(#{<<"bogon">> := Ip}) ->
+    %% Answered locally, so this needs no route and pins the synthesized shape
+    %% rather than a fixture's idea of it.
+    {Ip, #{}};
+fixture(#{<<"body">> := Body}) ->
+    Ip = maps:get(<<"ip">>, Body),
+    {Ip, #{Ip => #{status => 200, body => Body}}}.
+
+%% `os:getenv/1' answers `false' for a variable that is not set, which is what the
+%% README's setup hands the core then: it runs with no key, and says so once.
+an_unset_key_builds_a_keyless_client_and_warns_once_test() ->
+    Warnings = collector(),
+    {ok, Core} = internetdata_middleware:new(#{api_key => false, on_warn => sink(Warnings)}),
+
+    ?assertEqual(undefined, maps:get(api_key, maps:get(client, Core))),
+    ?assertMatch([_], seen(Warnings)),
+    ?assertNotEqual(nomatch, binary:match(hd(seen(Warnings)), <<"os:getenv/1">>)),
+    internetdata_middleware:close(Core),
+
+    Quiet = collector(),
+    {ok, Keyed} = internetdata_middleware:new(#{api_key => <<"k">>, on_warn => sink(Quiet)}),
+    ?assertEqual([], seen(Quiet)),
+    internetdata_middleware:close(Keyed).
+
+%% Elixir's `System.get_env/1' answers `nil' instead, which crashed the core's
+%% client until 3.6.0 and so the application that started it.
+a_nil_key_builds_a_keyless_client_and_warns_once_test() ->
+    Warnings = collector(),
+    {ok, Core} = internetdata_middleware:new(#{api_key => nil, on_warn => sink(Warnings)}),
+    ?assertEqual(undefined, maps:get(api_key, maps:get(client, Core))),
+    ?assertMatch([_], seen(Warnings)),
+    ?assertNotEqual(nomatch, binary:match(hd(seen(Warnings)), <<"System.get_env/1">>)),
+    internetdata_middleware:close(Core).
+
+%% A served answer carries every member the spec requires, so a test's own members
+%% go over Unlimited's answer rather than standing alone.
+serving(Body, Options) ->
+    Stub = internetdata_stub:start(
+        #{?PUBLIC_IP => #{status => 200, body => maps:merge(internetdata_stub:answer(?PUBLIC_IP), Body)}}
+    ),
+    {ok, Core} = core(Stub, Options),
+    {Stub, Core}.
+
+core(Stub, Options) ->
+    internetdata_middleware:new(Options#{
+        client => internetdata:new(#{http => internetdata_stub:http(Stub), cache => false,
+                                     retries => 0})
+    }).
+
+fixed(Ip) ->
+    fun(_View) -> Ip end.
+
+%% A PROXY header is the connecting peer's word, so only a trusted balancer's is
+%% read: from anywhere else, or with no source in it, the socket peer answers.
+proxy_protocol_reads_the_header_only_from_a_trusted_balancer_test() ->
+    Via = fun(Peer, Source) ->
+        (view(Peer, #{}))#{proxy_address => fun() -> Source end}
+    end,
+    Selector = internetdata_selectors:proxy_protocol([<<"10.0.0.0/8">>, "192.0.2.7", <<"2001:db8::/32">>]),
+    ?assertEqual(<<"45.83.91.1">>, run(Selector, Via(<<"10.1.2.3">>, <<"45.83.91.1">>))),
+    ?assertEqual(<<"45.83.91.1">>, run(Selector, Via(<<"192.0.2.7">>, <<"45.83.91.1">>))),
+    ?assertEqual(<<"45.83.91.1">>, run(Selector, Via(<<"2001:db8::5">>, <<"45.83.91.1">>))),
+    ?assertEqual(<<"45.83.91.1">>, run(Selector, Via(<<"::ffff:10.0.0.9">>, <<"45.83.91.1">>))),
+    %% A forged header from a peer that is no balancer of yours.
+    ?assertEqual(<<"203.0.113.9">>, run(Selector, Via(<<"203.0.113.9">>, <<"45.83.91.1">>))),
+    ?assertEqual(<<"192.0.2.8">>, run(Selector, Via(<<"192.0.2.8">>, <<"45.83.91.1">>))),
+    ?assertEqual(<<"11.0.0.1">>, run(Selector, Via(<<"11.0.0.1">>, <<"45.83.91.1">>))),
+    %% A balancer's own health check carries no source; a framework with no
+    %% PROXY support has no member to read.
+    ?assertEqual(<<"10.1.2.3">>, run(Selector, Via(<<"10.1.2.3">>, undefined))),
+    ?assertEqual(<<"10.1.2.3">>, run(Selector, view(<<"10.1.2.3">>, #{}))),
+    ?assertEqual(<<"10.1.2.3">>, run(internetdata_selectors:proxy_protocol([]),
+                                     Via(<<"10.1.2.3">>, <<"45.83.91.1">>))),
+    [?assertError({badarg, {trusted, Bad}}, internetdata_selectors:proxy_protocol([Bad]))
+     || Bad <- [<<"10.0.0.0/33">>, <<"10.0.0.0/x">>, <<"not an address">>, <<"10.0.0">>,
+                <<"2001:db8::/129">>]].
+
+view(Ip, Headers) ->
+    #{header => fun(Name) -> maps:get(string:lowercase(Name), Headers, undefined) end,
+      framework_ip => fun() -> Ip end}.
+
+run(Selector, View) ->
+    internetdata_selectors:resolve(Selector, View).
+
+%% eunit runs each test in its own process, so a plain ref-counted collector
+%% process is enough and needs no cleanup beyond the test's own lifetime.
+collector() ->
+    spawn_link(fun() -> collect([]) end).
+
+collect(Seen) ->
+    receive
+        {warn, Message} -> collect(Seen ++ [Message]);
+        {seen, From} ->
+            From ! {seen, Seen},
+            collect(Seen)
+    end.
+
+sink(Pid) ->
+    fun(Message) -> Pid ! {warn, Message} end.
+
+seen(Pid) ->
+    Pid ! {seen, self()},
+    receive
+        {seen, Messages} -> Messages
+    after 5000 -> erlang:error(timeout)
+    end.
+
+corpus(Section) ->
+    {ok, Raw} = file:read_file(testdata_path()),
+    maps:get(Section, maps:get(<<"middleware">>, json:decode(Raw))).
+
+%% rebar3 runs from the project root, but a bare eunit run from anywhere else
+%% would not, so fall back to walking up from the built application.
+testdata_path() ->
+    case filelib:is_regular("testdata/testdata.json") of
+        true ->
+            "testdata/testdata.json";
+        false ->
+            filename:join([code:lib_dir(internetdata), "..", "..", "..", "..",
+                           "testdata", "testdata.json"])
+    end.
