@@ -33,7 +33,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, whi
 
 ### With an API key
 
-Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domain count. The plans differ only in how many lookups they include, and a free account tries every field, 100 lookups a day. Create a key in the [console](https://app.internetdata.io), then pass it in:
+Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. The plans differ only in how many lookups they include, and a free account tries every field, 100 lookups a day. Create a key in the [console](https://app.internetdata.io), then pass it in:
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),

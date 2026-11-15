@@ -235,7 +235,8 @@
     abuse_email := binary()
 }.
 -type hosted_domains() :: #{
-    total := integer()
+    total := integer(),
+    domains => [binary()]
 }.
 -type asn_result() :: #{
     asn := integer(),
@@ -392,7 +393,7 @@ bogon(Ip) ->
         <<"whois">> => Whois#{<<"asn">> => 0},
         <<"rwhois">> => blank([<<"id">>, <<"name">>, <<"country">>, <<"source">>, <<"domain">>,
                                <<"abuse_email">>]),
-        <<"hosted_domains">> => #{<<"total">> => 0}
+        <<"hosted_domains">> => #{<<"total">> => 0, <<"domains">> => []}
     },
     from_wire(Wire).
 
@@ -660,6 +661,7 @@ key(rwhois, <<"source">>) -> source;
 key(rwhois, <<"domain">>) -> domain;
 key(rwhois, <<"abuse_email">>) -> abuse_email;
 key(hosted_domains, <<"total">>) -> total;
+key(hosted_domains, <<"domains">>) -> domains;
 key(asn_lookup, <<"asn">>) -> asn;
 key(asn_lookup, <<"name">>) -> name;
 key(asn_lookup, <<"country">>) -> country;

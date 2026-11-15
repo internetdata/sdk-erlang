@@ -1108,7 +1108,7 @@ lookup_shape() ->
     Rwhois = {object, [{<<"id">>, string, true}, {<<"name">>, string, true}, {<<"country">>, string, true},
                        {<<"source">>, string, true}, {<<"domain">>, string, true},
                        {<<"abuse_email">>, string, true}]},
-    Hosted = {object, [{<<"total">>, integer, true}]},
+    Hosted = {object, [{<<"total">>, integer, true}, {<<"domains">>, {list, string}, false}]},
     {object, [{<<"ip">>, string, true}, {<<"is_bogon">>, boolean, true}, {<<"is_vpn">>, boolean, false},
               {<<"is_tor">>, boolean, true}, {<<"is_relay">>, boolean, true},
               {<<"is_resproxy">>, boolean, false}, {<<"is_dcproxy">>, boolean, false},
