@@ -2,6 +2,13 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.15.0 - 2026-11-15
+
+### Features
+
+- Release: stop before the GitHub Release when hex.pm only stages the publish ([`54f7268`](https://github.com/internetdata/sdk-erlang/commit/54f72685e3ce028926a26d084f8f06abfa2fe0a9))
+- Read hosted_domains' 10 most popular domains ([`c0c52cf`](https://github.com/internetdata/sdk-erlang/commit/c0c52cfc062e8b47c819b6af64db3b9e144d785f))
+
 ## 1.14.1 - 2026-11-14
 
 ### Fixes
