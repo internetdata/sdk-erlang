@@ -254,6 +254,15 @@
     rpki_not_found => integer(),
     whois => #{binary() => binary()},
     prefixes => [asn_prefix()],
+    rank => integer(),
+    tier1 => boolean(),
+    num_upstreams => integer(),
+    upstreams => [integer()],
+    num_peers => integer(),
+    peers => [integer()],
+    num_downstreams => integer(),
+    downstreams => [integer()],
+    hosted_domains => hosted_domains(),
     trial_expired => boolean()
 }.
 -type asn_prefix() :: #{
@@ -334,6 +343,7 @@
 }.
 -type entitlement_plan() :: #{
     key := binary(),
+    name := binary(),
     tier := binary()
 }.
 -type entitlement_usage() :: #{
@@ -677,6 +687,15 @@ key(asn_lookup, <<"rpki_invalid">>) -> rpki_invalid;
 key(asn_lookup, <<"rpki_not_found">>) -> rpki_not_found;
 key(asn_lookup, <<"whois">>) -> whois;
 key(asn_lookup, <<"prefixes">>) -> prefixes;
+key(asn_lookup, <<"rank">>) -> rank;
+key(asn_lookup, <<"tier1">>) -> tier1;
+key(asn_lookup, <<"num_upstreams">>) -> num_upstreams;
+key(asn_lookup, <<"upstreams">>) -> upstreams;
+key(asn_lookup, <<"num_peers">>) -> num_peers;
+key(asn_lookup, <<"peers">>) -> peers;
+key(asn_lookup, <<"num_downstreams">>) -> num_downstreams;
+key(asn_lookup, <<"downstreams">>) -> downstreams;
+key(asn_lookup, <<"hosted_domains">>) -> hosted_domains;
 key(asn_lookup, <<"trial_expired">>) -> trial_expired;
 key(asn_prefix, <<"prefix">>) -> prefix;
 key(asn_prefix, <<"peer_count">>) -> peer_count;
@@ -731,6 +750,7 @@ key(entitlement_apikey, <<"id">>) -> id;
 key(entitlement_apikey, <<"expires">>) -> expires;
 key(entitlement_apikey, <<"allowed_cidrs">>) -> allowed_cidrs;
 key(entitlement_plan, <<"key">>) -> key;
+key(entitlement_plan, <<"name">>) -> name;
 key(entitlement_plan, <<"tier">>) -> tier;
 key(entitlement_usage, <<"requests">>) -> requests;
 key(entitlement_usage, <<"quota">>) -> quota;
@@ -782,6 +802,7 @@ nested(lookup, <<"whois">>) -> whois;
 nested(lookup, <<"rwhois">>) -> rwhois;
 nested(lookup, <<"hosted_domains">>) -> hosted_domains;
 nested(asn_lookup, <<"prefixes">>) -> asn_prefix;
+nested(asn_lookup, <<"hosted_domains">>) -> hosted_domains;
 nested(domain_lookup, <<"dns">>) -> dns;
 nested(domain_lookup, <<"ip_ranges">>) -> ip_ranges;
 nested(domain_lookup, <<"disposable">>) -> disposable;

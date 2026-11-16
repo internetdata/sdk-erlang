@@ -473,8 +473,9 @@ database_downloads(Client, Options) ->
 %%
 %% The API answers a 302 straight to object storage and this reads the `Location'
 %% without following it, so what comes back is a link that carries NO credential
-%% of yours and can be handed to whatever does the transfer. It authorizes the
-%% START of a transfer, so one already running is not interrupted when it lapses.
+%% of yours and can be handed to whatever does the transfer. The link only has to
+%% be valid when a transfer starts, so one already running isn't cut off when it
+%% lapses.
 -spec database_download_url(client(), binary() | string(), format()) ->
     {ok, binary()} | {error, internetdata_error:error()}.
 database_download_url(Client, Id, Format) ->
@@ -1140,7 +1141,14 @@ asn_shape() ->
               {<<"num_prefixes4">>, integer, false}, {<<"num_prefixes6">>, integer, false},
               {<<"rpki_valid">>, integer, false}, {<<"rpki_invalid">>, integer, false},
               {<<"rpki_not_found">>, integer, false}, {<<"whois">>, {map_of, string}, false},
-              {<<"prefixes">>, {list, Prefix}, false}, {<<"trial_expired">>, boolean, false}]}.
+              {<<"prefixes">>, {list, Prefix}, false}, {<<"rank">>, integer, false},
+              {<<"tier1">>, boolean, false}, {<<"num_upstreams">>, integer, false},
+              {<<"upstreams">>, {list, integer}, false}, {<<"num_peers">>, integer, false},
+              {<<"peers">>, {list, integer}, false}, {<<"num_downstreams">>, integer, false},
+              {<<"downstreams">>, {list, integer}, false},
+              {<<"hosted_domains">>, {object, [{<<"total">>, integer, true},
+                                               {<<"domains">>, {list, string}, false}]}, false},
+              {<<"trial_expired">>, boolean, false}]}.
 
 domain_shape() ->
     Address = {object, [{<<"ip">>, string, true}, {<<"last_seen">>, string, true}]},
@@ -1166,7 +1174,7 @@ domain_shape() ->
 entitlement_shape() ->
     Apikey = {object, [{<<"id">>, string, true}, {<<"expires">>, date_time, false},
                        {<<"allowed_cidrs">>, {list, string}, true}]},
-    Plan = {object, [{<<"key">>, string, true}, {<<"tier">>, string, true}]},
+    Plan = {object, [{<<"key">>, string, true}, {<<"name">>, string, true}, {<<"tier">>, string, true}]},
     Usage = {object, [{<<"requests">>, integer, true}, {<<"quota">>, integer, true},
                       {<<"hard_limit">>, integer, false}, {<<"window_start">>, date_time, true},
                       {<<"window_end">>, date_time, true}]},

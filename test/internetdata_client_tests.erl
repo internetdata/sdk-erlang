@@ -321,6 +321,9 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
         {<<"/asn/9009">>, A#{<<"prefixes">> => [1]}},
         {<<"/asn/9009">>, A#{<<"prefixes">> => [Prefix#{<<"other_origins">> => [<<"x">>]}]}},
         {<<"/asn/9009">>, A#{<<"whois">> => #{<<"abuse_email">> => 1}}},
+        {<<"/asn/9009">>, A#{<<"rank">> => <<"341">>}}, {<<"/asn/9009">>, A#{<<"tier1">> => <<"false">>}},
+        {<<"/asn/9009">>, A#{<<"upstreams">> => [<<"174">>]}}, {<<"/asn/9009">>, A#{<<"downstreams">> => [null]}},
+        {<<"/asn/9009">>, A#{<<"hosted_domains">> => #{<<"domains">> => []}}},
         {<<"/domain/example.com">>, D#{<<"is_registered">> => <<"yes">>}},
         {<<"/domain/example.com">>, maps:remove(<<"has_mx">>, D)},
         {<<"/domain/example.com">>,
@@ -330,6 +333,8 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
         {?ENTITLEMENT_PATH, E#{<<"usage">> => Usage#{<<"requests">> => <<"1">>}}},
         {?ENTITLEMENT_PATH, E#{<<"apikey">> => Key#{<<"allowed_cidrs">> => [1]}}},
         {?ENTITLEMENT_PATH, E#{<<"plan">> => Plan#{<<"tier">> => 1}}},
+        {?ENTITLEMENT_PATH, E#{<<"plan">> => Plan#{<<"name">> => 1}}},
+        {?ENTITLEMENT_PATH, E#{<<"plan">> => maps:remove(<<"name">>, Plan)}},
         {?ENTITLEMENT_PATH, E#{<<"usage">> => Usage#{<<"window_start">> => <<"x">>}}},
         {?ENTITLEMENT_PATH, E#{<<"apikey">> => Key#{<<"expires">> => <<"monday">>}}},
         {?ENTITLEMENT_PATH, maps:remove(<<"plan">>, E)}
@@ -1320,6 +1325,7 @@ my_entitlement_reports_the_plan_and_the_usage_test() ->
 
     ?assertEqual(<<"max">>, maps:get(key, maps:get(plan, Account))),
     ?assertEqual(<<"max">>, maps:get(tier, maps:get(plan, Account))),
+    ?assertEqual(<<"Max">>, maps:get(name, maps:get(plan, Account))),
     Usage = maps:get(usage, Account),
     ?assertEqual(580, maps:get(requests, Usage)),
     ?assertEqual(5000000, maps:get(quota, Usage)),
@@ -1603,7 +1609,7 @@ entitlement_ok() ->
     #{<<"org_id">> => <<"85bb51e4-2eb6-4a31-8e4d-02ba8b98fe61">>,
       <<"apikey">> => #{<<"id">> => <<"0ab424cc-7619-4dad-b027-afacdc2cedb0">>, <<"expires">> => null,
                         <<"allowed_cidrs">> => []},
-      <<"plan">> => #{<<"key">> => <<"max">>, <<"tier">> => <<"max">>},
+      <<"plan">> => #{<<"key">> => <<"max">>, <<"name">> => <<"Max">>, <<"tier">> => <<"max">>},
       <<"usage">> => #{<<"requests">> => 580, <<"quota">> => 5000000, <<"hard_limit">> => null,
                        <<"window_start">> => <<"2026-09-04T07:00:00Z">>,
                        <<"window_end">> => <<"2026-10-04T07:00:00Z">>}}.

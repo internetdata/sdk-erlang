@@ -56,7 +56,7 @@ maps:get(name, As).                              % <<"M247 Europe SRL">>
 maps:get(has_mx, Domain).                        % whether it has an MX record
 ```
 
-Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record and the prefixes it announces, and the domain's records, its organization's IP ranges and whether it is disposable. Neither answer is cached, and both calls take the options `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries. `lookup` takes addresses alone, and answers anything else `bad_request` without sending it.
+Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record, the prefixes it announces, its rank, Tier 1 flag, upstreams, peers and downstreams, and the domains it hosts, and the domain's records, its organization's IP ranges and whether it is disposable. Neither answer is cached, and both calls take the options `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries. `lookup` takes addresses alone, and answers anything else `bad_request` without sending it.
 
 ### Your own address
 
@@ -74,6 +74,7 @@ Same answer `lookup` would give for that address, and the same cost against your
 Plan = maps:get(plan, Entitlement),
 Usage = maps:get(usage, Entitlement),
 maps:get(key, Plan).           % <<"max">>
+maps:get(name, Plan).          % <<"Max">>, the name to show
 maps:get(requests, Usage).     % 580
 maps:get(window_end, Usage).   % when the allowance resets
 ```
@@ -245,7 +246,7 @@ For a small database you can take the bytes directly. This holds the whole file 
 {ok, Url} = internetdata:database_download_url(Client, <<"bogon_ip_v1">>, mmdb).
 ```
 
-It authorizes the START of a transfer, so one already running is not interrupted when the link lapses.
+The link only has to be valid when a transfer starts, so one already running isn't cut off when it lapses.
 
 Each of the three downloads the build that is live unless you name one, through the arity that takes options. A `database.updated` webhook names the build it announces and carries its `sha256`, so a receiver that downloads after the next publish asks for that build to get the file the hash is of:
 
