@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.16.0 - 2026-11-16
+
+### Features
+
+- Read an AS's rank, neighbors and hosted domains, and the plan's name ([`0ac2da3`](https://github.com/internetdata/sdk-erlang/commit/0ac2da3c82eb336098943f5d15afe04b0dcab518))
+
 ## 1.15.0 - 2026-11-15
 
 ### Features
