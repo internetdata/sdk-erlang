@@ -167,7 +167,7 @@ end.
 
 `kind` is one of `bad_request`, `unauthorized`, `forbidden`, `rate_limited`, `quota_exceeded`, `server_error`, `network` or `io`. `status` carries the HTTP status where there was one, and `message` is the API's own: a lookup's refusal says what went wrong, and a database call's names its result code, so `NOT_LICENSED`, `LICENSE_EXPIRED` and `IP_NOT_ALLOWED` (a call from an address the key or its organization does not allow) tell you which 403 you got without having to ask us.
 
-Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are not the same thing. A rate limit carries `Retry-After`, and retrying later works; a spent allowance, such as an overage cap you set in Billing, needs the cap raised or the window to roll over. The library retries rate limits for you, but never a spent allowance.
+Note that `rate_limited` and `quota_exceeded` both arrive as HTTP 429 and are not the same thing. A rate limit carries `Retry-After`, and retrying later works; one without it is `quota_exceeded`. The library retries rate limits for you, but never `quota_exceeded`. The API itself always sends `Retry-After` with a 429, so that one comes from something in between, such as a proxy; a paid key past its overage cap gets `cap_reached` instead.
 
 ### Timeouts and retries
 
@@ -328,12 +328,13 @@ Each redirect URI must be https on a public host name, or http on a loopback add
 
 ### Absent is not false
 
-Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `rpki_status`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its daily trial is spent. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `rpki_status`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its daily trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
 
 ```erlang
 maps:get(is_vpn, Result, false).          % when you only want the flag
 maps:is_key(is_vpn, Result).              % false on Unlimited: not in your plan
 maps:get(trial_expired, Result, false).   % true: a free-plan key's daily trial is spent
+maps:get(cap_reached, Result, false).     % true: a paid key is past its overage cap
 ```
 
 ## Other Libraries

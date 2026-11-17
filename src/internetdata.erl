@@ -1128,7 +1128,7 @@ lookup_shape() ->
               {<<"location">>, Location, true}, {<<"asn">>, Asn, true}, {<<"company">>, Company, true},
               {<<"hostname">>, string, true}, {<<"abuse">>, Abuse, true}, {<<"whois">>, Whois, false},
               {<<"rwhois">>, Rwhois, false}, {<<"hosted_domains">>, Hosted, false},
-              {<<"trial_expired">>, boolean, false}]}.
+              {<<"trial_expired">>, boolean, false}, {<<"cap_reached">>, boolean, false}]}.
 
 asn_shape() ->
     Prefix = {object, [{<<"prefix">>, string, true}, {<<"peer_count">>, integer, true},
@@ -1148,7 +1148,7 @@ asn_shape() ->
               {<<"downstreams">>, {list, integer}, false},
               {<<"hosted_domains">>, {object, [{<<"total">>, integer, true},
                                                {<<"domains">>, {list, string}, false}]}, false},
-              {<<"trial_expired">>, boolean, false}]}.
+              {<<"trial_expired">>, boolean, false}, {<<"cap_reached">>, boolean, false}]}.
 
 domain_shape() ->
     Address = {object, [{<<"ip">>, string, true}, {<<"last_seen">>, string, true}]},
@@ -1169,7 +1169,8 @@ domain_shape() ->
               {<<"is_disposable">>, boolean, false}, {<<"has_a">>, boolean, true},
               {<<"has_aaaa">>, boolean, true}, {<<"has_mx">>, boolean, true}, {<<"has_ns">>, boolean, true},
               {<<"has_cname">>, boolean, true}, {<<"dns">>, Dns, false}, {<<"ip_ranges">>, Ranges, false},
-              {<<"disposable">>, Disposable, false}, {<<"trial_expired">>, boolean, false}]}.
+              {<<"disposable">>, Disposable, false}, {<<"trial_expired">>, boolean, false},
+              {<<"cap_reached">>, boolean, false}]}.
 
 entitlement_shape() ->
     Apikey = {object, [{<<"id">>, string, true}, {<<"expires">>, date_time, false},

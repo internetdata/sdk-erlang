@@ -75,7 +75,8 @@
     whois => whois(),
     rwhois => rwhois(),
     hosted_domains => hosted_domains(),
-    trial_expired => boolean()
+    trial_expired => boolean(),
+    cap_reached => boolean()
 }.
 -type class() :: #{
     provider => binary(),
@@ -263,7 +264,8 @@
     num_downstreams => integer(),
     downstreams => [integer()],
     hosted_domains => hosted_domains(),
-    trial_expired => boolean()
+    trial_expired => boolean(),
+    cap_reached => boolean()
 }.
 -type asn_prefix() :: #{
     prefix := binary(),
@@ -286,7 +288,8 @@
     dns => dns(),
     ip_ranges => ip_ranges(),
     disposable => disposable(),
-    trial_expired => boolean()
+    trial_expired => boolean(),
+    cap_reached => boolean()
 }.
 -type dns() :: #{
     a := [dns_address()],
@@ -545,6 +548,7 @@ key(lookup, <<"whois">>) -> whois;
 key(lookup, <<"rwhois">>) -> rwhois;
 key(lookup, <<"hosted_domains">>) -> hosted_domains;
 key(lookup, <<"trial_expired">>) -> trial_expired;
+key(lookup, <<"cap_reached">>) -> cap_reached;
 key(class, <<"provider">>) -> provider;
 key(class, <<"provider_name">>) -> provider_name;
 key(class, <<"confidence">>) -> confidence;
@@ -697,6 +701,7 @@ key(asn_lookup, <<"num_downstreams">>) -> num_downstreams;
 key(asn_lookup, <<"downstreams">>) -> downstreams;
 key(asn_lookup, <<"hosted_domains">>) -> hosted_domains;
 key(asn_lookup, <<"trial_expired">>) -> trial_expired;
+key(asn_lookup, <<"cap_reached">>) -> cap_reached;
 key(asn_prefix, <<"prefix">>) -> prefix;
 key(asn_prefix, <<"peer_count">>) -> peer_count;
 key(asn_prefix, <<"rpki_status">>) -> rpki_status;
@@ -716,6 +721,7 @@ key(domain_lookup, <<"dns">>) -> dns;
 key(domain_lookup, <<"ip_ranges">>) -> ip_ranges;
 key(domain_lookup, <<"disposable">>) -> disposable;
 key(domain_lookup, <<"trial_expired">>) -> trial_expired;
+key(domain_lookup, <<"cap_reached">>) -> cap_reached;
 key(dns, <<"a">>) -> a;
 key(dns, <<"aaaa">>) -> aaaa;
 key(dns, <<"mx">>) -> mx;
