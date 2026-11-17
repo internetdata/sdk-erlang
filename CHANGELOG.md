@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.17.0 - 2026-11-17
+
+### Features
+
+- Read cap_reached on a paid answer past its overage cap ([`37d4199`](https://github.com/internetdata/sdk-erlang/commit/37d41994da747f7b5a72ef74303dd32560b71d92))
+
 ## 1.16.0 - 2026-11-16
 
 ### Features
