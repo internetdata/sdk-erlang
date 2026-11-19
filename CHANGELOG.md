@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.17.2 - 2026-11-19
+
+### Fixes
+
+- Cache a spent trial's or a reached cap's answer for a minute at most ([`b6f9e08`](https://github.com/internetdata/sdk-erlang/commit/b6f9e08680ff76a6274942f8a7f52be073122e35))
+
 ## 1.17.1 - 2026-11-18
 
 ### Fixes
