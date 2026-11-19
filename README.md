@@ -123,6 +123,8 @@ Client = internetdata:new(#{cache => #{max => 50000, ttl_ms => 6 * 60 * 60 * 100
 ClientNoCache = internetdata:new(#{cache => false}).
 ```
 
+An answer with `trial_expired` or `cap_reached` true is cached for a minute at most, so a new day's trial or a raised cap reaches you within a minute.
+
 The cache belongs to one client and is never shared, because two clients holding different keys are on different plans and so entitled to different fields. It is owned by a process linked to whoever called `new/1`, so a client built inside a short-lived process loses its cache when that process ends. `internetdata:close(Client)` releases it; a client built with `cache => false` starts no process at all and needs no closing.
 
 ### Private and reserved addresses
