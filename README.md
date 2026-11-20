@@ -79,7 +79,7 @@ maps:get(requests, Usage).     % 580
 maps:get(window_end, Usage).   % when the allowance resets
 ```
 
-Usage counts against the anniversary of your subscription on a paid plan, not the calendar month and not the billing period, and against the UTC day on the free plan; it is the same number a lookup is gated on. `hard_limit` is `null` on an uncapped plan, which is not the same as zero. `my_ip/2` and `my_entitlement/2` take a per-call options map.
+Usage counts against the anniversary of your subscription on a paid plan, not the calendar month and not the billing period, and against its trial on the free plan; it is the same number a lookup is gated on. `hard_limit` is `null` on an uncapped plan, which is not the same as zero. `my_ip/2` and `my_entitlement/2` take a per-call options map.
 
 ### Batch lookup
 
@@ -330,7 +330,7 @@ Each redirect URI must be https on a public host name, or http on a loopback add
 
 ### Absent is not false
 
-Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `rpki_status`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
 
 ```erlang
 maps:get(is_vpn, Result, false).          % when you only want the flag
