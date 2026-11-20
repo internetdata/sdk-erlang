@@ -245,8 +245,10 @@ lookup_domain(Client, Domain) ->
     lookup_domain(Client, Domain, #{}).
 
 %% @doc What InternetData knows about one domain: whether it is registered and
-%% which record types it has on every plan, and on a paid one the records, its
-%% organization's IP ranges and whether it is disposable.
+%% which record types it has on every plan, and on a paid one the records, the
+%% network announcing each address, the other domains on its first IPv4 address,
+%% its organization's IP ranges, whether it is disposable, what its home page says
+%% and links to, and the domains whose home page redirects or links to it.
 %%
 %% `Domain' is sent as given, and the API normalizes it; one it cannot read is a
 %% `bad_request'. Never cached. `Options' is {@link lookup/3}'s.
@@ -1093,9 +1095,7 @@ lookup_shape() ->
                          {<<"latitude">>, number, false}, {<<"longitude">>, number, false},
                          {<<"accuracy_radius">>, integer, false}, {<<"geoname_id">>, string, false},
                          {<<"dma_code">>, string, false}, {<<"last_changed">>, string, false}]},
-    Asn = {object, [{<<"asn">>, integer, true}, {<<"name">>, string, true}, {<<"domain">>, string, true},
-                    {<<"type">>, string, true}, {<<"prefix">>, string, true},
-                    {<<"country">>, string, false}, {<<"rpki_status">>, string, false}]},
+    Asn = asn_member_shape(),
     Company = {object, [{<<"name">>, string, true}, {<<"domain">>, string, true},
                         {<<"type">>, string, false}, {<<"country">>, string, false}]},
     Abuse = {object, [{<<"email">>, string, true}, {<<"name">>, string, false},
@@ -1165,12 +1165,29 @@ domain_shape() ->
                        {<<"ranges">>, {list, Range}, true}]},
     Disposable = {object, [{<<"confidence">>, string, false}, {<<"providers">>, {list, string}, false},
                            {<<"first_seen">>, string, false}, {<<"last_seen">>, string, false}]},
+    Host = {object, [{<<"ip">>, string, true}, {<<"asn">>, asn_member_shape(), true}]},
+    Cohosted = {object, [{<<"ip">>, string, true}, {<<"total">>, integer, true},
+                         {<<"domains">>, {list, string}, true}]},
+    Web = {object, [{<<"url">>, string, true}, {<<"title">>, string, true}, {<<"description">>, string, true},
+                    {<<"last_seen">>, string, true},
+                    {<<"links">>, {object, [{<<"total">>, integer, true}, {<<"hosts">>, {list, string}, true}]},
+                     true}]},
+    Referrers = {object, [{<<"total">>, integer, true}, {<<"domains">>, {list, string}, true}]},
     {object, [{<<"domain">>, string, true}, {<<"is_registered">>, boolean, true},
               {<<"is_disposable">>, boolean, false}, {<<"has_a">>, boolean, true},
               {<<"has_aaaa">>, boolean, true}, {<<"has_mx">>, boolean, true}, {<<"has_ns">>, boolean, true},
-              {<<"has_cname">>, boolean, true}, {<<"dns">>, Dns, false}, {<<"ip_ranges">>, Ranges, false},
-              {<<"disposable">>, Disposable, false}, {<<"trial_expired">>, boolean, false},
-              {<<"cap_reached">>, boolean, false}]}.
+              {<<"has_cname">>, boolean, true}, {<<"dns">>, Dns, false}, {<<"hosting">>, {list, Host}, false},
+              {<<"cohosted_domains">>, Cohosted, false}, {<<"ip_ranges">>, Ranges, false},
+              {<<"disposable">>, Disposable, false}, {<<"web">>, Web, false},
+              {<<"redirects">>, Referrers, false}, {<<"backlinks">>, Referrers, false},
+              {<<"trial_expired">>, boolean, false}, {<<"cap_reached">>, boolean, false}]}.
+
+%% An address answer's `asn', which a domain answer's `hosting' carries for each
+%% of its addresses.
+asn_member_shape() ->
+    {object, [{<<"asn">>, integer, true}, {<<"name">>, string, true}, {<<"domain">>, string, true},
+              {<<"type">>, string, true}, {<<"prefix">>, string, true},
+              {<<"country">>, string, false}, {<<"rpki_status">>, string, false}]}.
 
 entitlement_shape() ->
     Apikey = {object, [{<<"id">>, string, true}, {<<"expires">>, date_time, false},

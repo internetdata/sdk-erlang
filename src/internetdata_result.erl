@@ -286,10 +286,35 @@
     has_ns := boolean(),
     has_cname := boolean(),
     dns => dns(),
+    hosting => [domain_host()],
+    cohosted_domains => cohosted_domains(),
     ip_ranges => ip_ranges(),
     disposable => disposable(),
+    web => domain_web(),
+    redirects => referring_domains(),
+    backlinks => referring_domains(),
     trial_expired => boolean(),
     cap_reached => boolean()
+}.
+-type domain_host() :: #{
+    ip := binary(),
+    asn := asn()
+}.
+-type cohosted_domains() :: #{
+    ip := binary(),
+    total := integer(),
+    domains := [binary()]
+}.
+-type domain_web() :: #{
+    url := binary(),
+    title := binary(),
+    description := binary(),
+    last_seen := binary(),
+    links := #{total := integer(), hosts := [binary()]}
+}.
+-type referring_domains() :: #{
+    total := integer(),
+    domains := [binary()]
 }.
 -type dns() :: #{
     a := [dns_address()],
@@ -718,8 +743,27 @@ key(domain_lookup, <<"has_mx">>) -> has_mx;
 key(domain_lookup, <<"has_ns">>) -> has_ns;
 key(domain_lookup, <<"has_cname">>) -> has_cname;
 key(domain_lookup, <<"dns">>) -> dns;
+key(domain_lookup, <<"hosting">>) -> hosting;
+key(domain_lookup, <<"cohosted_domains">>) -> cohosted_domains;
 key(domain_lookup, <<"ip_ranges">>) -> ip_ranges;
 key(domain_lookup, <<"disposable">>) -> disposable;
+key(domain_lookup, <<"web">>) -> web;
+key(domain_lookup, <<"redirects">>) -> redirects;
+key(domain_lookup, <<"backlinks">>) -> backlinks;
+key(domain_host, <<"ip">>) -> ip;
+key(domain_host, <<"asn">>) -> asn;
+key(cohosted_domains, <<"ip">>) -> ip;
+key(cohosted_domains, <<"total">>) -> total;
+key(cohosted_domains, <<"domains">>) -> domains;
+key(domain_web, <<"url">>) -> url;
+key(domain_web, <<"title">>) -> title;
+key(domain_web, <<"description">>) -> description;
+key(domain_web, <<"last_seen">>) -> last_seen;
+key(domain_web, <<"links">>) -> links;
+key(domain_web_links, <<"total">>) -> total;
+key(domain_web_links, <<"hosts">>) -> hosts;
+key(referring_domains, <<"total">>) -> total;
+key(referring_domains, <<"domains">>) -> domains;
 key(domain_lookup, <<"trial_expired">>) -> trial_expired;
 key(domain_lookup, <<"cap_reached">>) -> cap_reached;
 key(dns, <<"a">>) -> a;
@@ -810,8 +854,15 @@ nested(lookup, <<"hosted_domains">>) -> hosted_domains;
 nested(asn_lookup, <<"prefixes">>) -> asn_prefix;
 nested(asn_lookup, <<"hosted_domains">>) -> hosted_domains;
 nested(domain_lookup, <<"dns">>) -> dns;
+nested(domain_lookup, <<"hosting">>) -> domain_host;
+nested(domain_lookup, <<"cohosted_domains">>) -> cohosted_domains;
 nested(domain_lookup, <<"ip_ranges">>) -> ip_ranges;
 nested(domain_lookup, <<"disposable">>) -> disposable;
+nested(domain_lookup, <<"web">>) -> domain_web;
+nested(domain_lookup, <<"redirects">>) -> referring_domains;
+nested(domain_lookup, <<"backlinks">>) -> referring_domains;
+nested(domain_host, <<"asn">>) -> asn;
+nested(domain_web, <<"links">>) -> domain_web_links;
 nested(dns, <<"a">>) -> dns_address;
 nested(dns, <<"aaaa">>) -> dns_address;
 nested(dns, <<"mx">>) -> dns_mx;

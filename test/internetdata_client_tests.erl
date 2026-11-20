@@ -286,6 +286,23 @@ a_well_formed_lookup_answer_reads_test_() ->
                               {<<"/asn/9009">>, asn_ok()}, {<<"/domain/example.com">>, domain_ok()},
                               {?ENTITLEMENT_PATH, entitlement_ok()}]].
 
+%% A paid domain answer's network on each address, co-hosted domains, home page,
+%% redirects and backlinks, each read with atom keys at every depth.
+a_paid_domain_answer_reads_its_hosting_web_and_referrers_test() ->
+    Stub = internetdata_stub:start(#{<<"/domain/example.com">> => #{body => domain_ok()}}),
+    {ok, D} = internetdata:lookup_domain(client(Stub), <<"example.com">>),
+    ?assertMatch([#{ip := <<"192.0.2.10">>, asn := #{asn := 64496, prefix := <<"192.0.2.0/24">>,
+                                                     rpki_status := <<"valid">>}}],
+                 maps:get(hosting, D)),
+    ?assertEqual(#{ip => <<"192.0.2.10">>, total => 2, domains => [<<"example.net">>, <<"example.org">>]},
+                 maps:get(cohosted_domains, D)),
+    ?assertEqual(#{url => <<"https://example.com/">>, title => <<"Example Domain">>, description => <<>>,
+                   last_seen => <<"2026-11-08">>, links => #{total => 1, hosts => [<<"www.iana.org">>]}},
+                 maps:get(web, D)),
+    ?assertEqual(#{total => 1, domains => [<<"example.net">>]}, maps:get(redirects, D)),
+    ?assertEqual(#{total => 0, domains => []}, maps:get(backlinks, D)),
+    internetdata_stub:stop(Stub).
+
 %% A member of another type than the spec's at any depth, a numeric string where
 %% a number is due among them, and a member the spec requires that is missing:
 %% each is an answer the call cannot read, never one handed back as served.
@@ -296,7 +313,9 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
     A = asn_ok(),
     #{<<"prefixes">> := [Prefix]} = A,
     D = domain_ok(),
-    #{<<"dns">> := Dns, <<"ip_ranges">> := Ranges} = D,
+    #{<<"dns">> := Dns, <<"ip_ranges">> := Ranges, <<"hosting">> := [Host], <<"web">> := DomainWeb,
+      <<"cohosted_domains">> := Cohosted} = D,
+    #{<<"asn">> := HostAsn} = Host,
     E = entitlement_ok(),
     #{<<"apikey">> := Key, <<"plan">> := Plan, <<"usage">> := Usage} = E,
     Ip = <<"/1.1.1.1">>,
@@ -333,6 +352,21 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
          D#{<<"dns">> => Dns#{<<"a">> => [#{<<"ip">> => 1, <<"last_seen">> => <<"x">>}]}}},
         {<<"/domain/example.com">>, D#{<<"ip_ranges">> => Ranges#{<<"ranges">> => [#{}]}}},
         {<<"/domain/example.com">>, D#{<<"disposable">> => #{<<"providers">> => [1]}}},
+        {<<"/domain/example.com">>, D#{<<"hosting">> => [1]}},
+        {<<"/domain/example.com">>, D#{<<"hosting">> => [maps:remove(<<"asn">>, Host)]}},
+        {<<"/domain/example.com">>, D#{<<"hosting">> => [Host#{<<"asn">> => HostAsn#{<<"asn">> => <<"64496">>}}]}},
+        {<<"/domain/example.com">>, D#{<<"hosting">> => [Host#{<<"asn">> => maps:remove(<<"prefix">>, HostAsn)}]}},
+        {<<"/domain/example.com">>, D#{<<"cohosted_domains">> => Cohosted#{<<"total">> => <<"2">>}}},
+        {<<"/domain/example.com">>, D#{<<"cohosted_domains">> => Cohosted#{<<"domains">> => [null]}}},
+        {<<"/domain/example.com">>, D#{<<"cohosted_domains">> => maps:remove(<<"ip">>, Cohosted)}},
+        {<<"/domain/example.com">>, D#{<<"web">> => DomainWeb#{<<"title">> => 1}}},
+        {<<"/domain/example.com">>, D#{<<"web">> => maps:remove(<<"last_seen">>, DomainWeb)}},
+        {<<"/domain/example.com">>, D#{<<"web">> => DomainWeb#{<<"links">> => #{<<"total">> => 1}}}},
+        {<<"/domain/example.com">>, D#{<<"web">> => DomainWeb#{<<"links">> => #{<<"total">> => 1, <<"hosts">> => [2]}}}},
+        {<<"/domain/example.com">>, D#{<<"redirects">> => #{<<"total">> => 1}}},
+        {<<"/domain/example.com">>, D#{<<"redirects">> => #{<<"total">> => null, <<"domains">> => []}}},
+        {<<"/domain/example.com">>, D#{<<"backlinks">> => #{<<"total">> => 0, <<"domains">> => <<"x">>}}},
+        {<<"/domain/example.com">>, D#{<<"backlinks">> => []}},
         {?ENTITLEMENT_PATH, E#{<<"usage">> => Usage#{<<"requests">> => <<"1">>}}},
         {?ENTITLEMENT_PATH, E#{<<"apikey">> => Key#{<<"allowed_cidrs">> => [1]}}},
         {?ENTITLEMENT_PATH, E#{<<"plan">> => Plan#{<<"tier">> => 1}}},
@@ -1606,7 +1640,20 @@ domain_ok() ->
                            <<"ipv4">> => 256,
                            <<"ranges">> => [#{<<"range">> => <<"192.0.2.0/24">>, <<"name">> => <<"EXAMPLE-NET">>,
                                               <<"country">> => <<"US">>}]},
-      <<"disposable">> => #{}, <<"trial_expired">> => false}.
+      <<"hosting">> => [#{<<"ip">> => <<"192.0.2.10">>,
+                          <<"asn">> => #{<<"asn">> => 64496, <<"name">> => <<"EXAMPLE-AS">>,
+                                         <<"domain">> => <<"example.net">>, <<"type">> => <<"hosting">>,
+                                         <<"prefix">> => <<"192.0.2.0/24">>, <<"country">> => <<"US">>,
+                                         <<"rpki_status">> => <<"valid">>}}],
+      <<"cohosted_domains">> => #{<<"ip">> => <<"192.0.2.10">>, <<"total">> => 2,
+                                  <<"domains">> => [<<"example.net">>, <<"example.org">>]},
+      <<"disposable">> => #{},
+      <<"web">> => #{<<"url">> => <<"https://example.com/">>, <<"title">> => <<"Example Domain">>,
+                     <<"description">> => <<>>, <<"last_seen">> => Seen,
+                     <<"links">> => #{<<"total">> => 1, <<"hosts">> => [<<"www.iana.org">>]}},
+      <<"redirects">> => #{<<"total">> => 1, <<"domains">> => [<<"example.net">>]},
+      <<"backlinks">> => #{<<"total">> => 0, <<"domains">> => []},
+      <<"trial_expired">> => false}.
 
 entitlement_ok() ->
     #{<<"org_id">> => <<"85bb51e4-2eb6-4a31-8e4d-02ba8b98fe61">>,
