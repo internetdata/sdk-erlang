@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.17.3 - 2026-11-20
+
+### Fixes
+
+- Re-pin the spec to 2026.11.20: the free trial without a count or period ([`4b2a070`](https://github.com/internetdata/sdk-erlang/commit/4b2a070ed65fe6728d5f759940fe79f4ba1a9f86))
+
 ## 1.17.2 - 2026-11-19
 
 ### Fixes
