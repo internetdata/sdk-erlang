@@ -33,7 +33,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, whi
 
 ### With an API key
 
-Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. The plans differ only in how many lookups they include, and a free account tries every field, 100 lookups a day. Create a key in the [console](https://app.internetdata.io), then pass it in:
+Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. The plans differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -123,7 +123,7 @@ Client = internetdata:new(#{cache => #{max => 50000, ttl_ms => 6 * 60 * 60 * 100
 ClientNoCache = internetdata:new(#{cache => false}).
 ```
 
-An answer with `trial_expired` or `cap_reached` true is cached for a minute at most, so a new day's trial or a raised cap reaches you within a minute.
+An answer with `trial_expired` or `cap_reached` true is cached for a minute at most, so a renewed trial or a raised cap reaches you within a minute.
 
 The cache belongs to one client and is never shared, because two clients holding different keys are on different plans and so entitled to different fields. It is owned by a process linked to whoever called `new/1`, so a client built inside a short-lived process loses its cache when that process ends. `internetdata:close(Client)` releases it; a client built with `cache => false` starts no process at all and needs no closing.
 
@@ -330,12 +330,12 @@ Each redirect URI must be https on a public host name, or http on a loopback add
 
 ### Absent is not false
 
-Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `rpki_status`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its daily trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `rpki_status`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
 
 ```erlang
 maps:get(is_vpn, Result, false).          % when you only want the flag
 maps:is_key(is_vpn, Result).              % false on Unlimited: not in your plan
-maps:get(trial_expired, Result, false).   % true: a free-plan key's daily trial is spent
+maps:get(trial_expired, Result, false).   % true: a free-plan key's trial is spent
 maps:get(cap_reached, Result, false).     % true: a paid key is past its overage cap
 ```
 
