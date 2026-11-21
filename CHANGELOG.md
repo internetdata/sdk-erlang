@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.18.1 - 2026-11-21
+
+### Fixes
+
+- Re-pin the spec to 2026.11.20 as republished: 64-bit AS numbers, and the AS's country and RPKI status required ([`9e486d6`](https://github.com/internetdata/sdk-erlang/commit/9e486d65af277e12fd93c564f24d8480baaa8f3c))
+
 ## 1.18.0 - 2026-11-20
 
 ### Features
