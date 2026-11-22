@@ -43,6 +43,7 @@
     is_pubproxy => boolean(),
     is_hosting => boolean(),
     is_cdn => boolean(),
+    is_bot => boolean(),
     is_anycast := boolean(),
     is_carrier := boolean(),
     is_satellite := boolean(),
@@ -60,6 +61,7 @@
     pubproxy => pubproxy(),
     hosting => class(),
     cdn => class(),
+    bot => bot(),
     carrier => carrier(),
     satellite => satellite(),
     ssh => ssh(),
@@ -75,6 +77,7 @@
     whois => whois(),
     rwhois => rwhois(),
     hosted_domains => hosted_domains(),
+    user_agent => user_agent(),
     trial_expired => boolean(),
     cap_reached => boolean()
 }.
@@ -83,6 +86,23 @@
     provider_name => binary(),
     confidence => binary(),
     last_seen => binary()
+}.
+-type bot() :: #{
+    provider => binary(),
+    provider_name => binary(),
+    agents => [binary()],
+    categories => [binary()],
+    verified => boolean(),
+    identity => binary(),
+    verified_by => binary(),
+    confidence => binary(),
+    first_seen => binary(),
+    last_seen => binary()
+}.
+-type user_agent() :: #{
+    agent := binary(),
+    kind := binary(),
+    verdict := binary()
 }.
 -type proxy() :: #{
     provider => binary(),
@@ -404,12 +424,12 @@ from_wire(Body) when is_map(Body) ->
 -spec bogon(binary()) -> result().
 bogon(Ip) ->
     Flags = [<<"is_vpn">>, <<"is_tor">>, <<"is_relay">>, <<"is_resproxy">>, <<"is_dcproxy">>,
-             <<"is_mobproxy">>, <<"is_pubproxy">>, <<"is_hosting">>, <<"is_cdn">>, <<"is_anycast">>,
-             <<"is_carrier">>, <<"is_satellite">>, <<"is_ssh">>, <<"is_smtp">>, <<"is_web">>,
+             <<"is_mobproxy">>, <<"is_pubproxy">>, <<"is_hosting">>, <<"is_cdn">>, <<"is_bot">>,
+             <<"is_anycast">>, <<"is_carrier">>, <<"is_satellite">>, <<"is_ssh">>, <<"is_smtp">>, <<"is_web">>,
              <<"is_dns_resolver">>, <<"is_bittorrent">>],
     Details = [<<"vpn">>, <<"tor">>, <<"relay">>, <<"resproxy">>, <<"dcproxy">>, <<"mobproxy">>,
-               <<"pubproxy">>, <<"hosting">>, <<"cdn">>, <<"carrier">>, <<"satellite">>, <<"ssh">>,
-               <<"smtp">>, <<"dns_resolver">>, <<"bittorrent">>],
+               <<"pubproxy">>, <<"hosting">>, <<"cdn">>, <<"bot">>, <<"carrier">>, <<"satellite">>,
+               <<"ssh">>, <<"smtp">>, <<"dns_resolver">>, <<"bittorrent">>],
     Location = blank([<<"continent">>, <<"continent_name">>, <<"country">>, <<"country_name">>,
                       <<"timezone">>, <<"currency_code">>, <<"currency_name">>, <<"currency_symbol">>,
                       <<"flag_emoji">>, <<"flag_unicode">>, <<"region">>, <<"region_code">>, <<"city">>,
@@ -540,6 +560,7 @@ key(lookup, <<"is_mobproxy">>) -> is_mobproxy;
 key(lookup, <<"is_pubproxy">>) -> is_pubproxy;
 key(lookup, <<"is_hosting">>) -> is_hosting;
 key(lookup, <<"is_cdn">>) -> is_cdn;
+key(lookup, <<"is_bot">>) -> is_bot;
 key(lookup, <<"is_anycast">>) -> is_anycast;
 key(lookup, <<"is_carrier">>) -> is_carrier;
 key(lookup, <<"is_satellite">>) -> is_satellite;
@@ -557,6 +578,7 @@ key(lookup, <<"mobproxy">>) -> mobproxy;
 key(lookup, <<"pubproxy">>) -> pubproxy;
 key(lookup, <<"hosting">>) -> hosting;
 key(lookup, <<"cdn">>) -> cdn;
+key(lookup, <<"bot">>) -> bot;
 key(lookup, <<"carrier">>) -> carrier;
 key(lookup, <<"satellite">>) -> satellite;
 key(lookup, <<"ssh">>) -> ssh;
@@ -572,12 +594,26 @@ key(lookup, <<"abuse">>) -> abuse;
 key(lookup, <<"whois">>) -> whois;
 key(lookup, <<"rwhois">>) -> rwhois;
 key(lookup, <<"hosted_domains">>) -> hosted_domains;
+key(lookup, <<"user_agent">>) -> user_agent;
 key(lookup, <<"trial_expired">>) -> trial_expired;
 key(lookup, <<"cap_reached">>) -> cap_reached;
 key(class, <<"provider">>) -> provider;
 key(class, <<"provider_name">>) -> provider_name;
 key(class, <<"confidence">>) -> confidence;
 key(class, <<"last_seen">>) -> last_seen;
+key(bot, <<"provider">>) -> provider;
+key(bot, <<"provider_name">>) -> provider_name;
+key(bot, <<"agents">>) -> agents;
+key(bot, <<"categories">>) -> categories;
+key(bot, <<"verified">>) -> verified;
+key(bot, <<"identity">>) -> identity;
+key(bot, <<"verified_by">>) -> verified_by;
+key(bot, <<"confidence">>) -> confidence;
+key(bot, <<"first_seen">>) -> first_seen;
+key(bot, <<"last_seen">>) -> last_seen;
+key(user_agent, <<"agent">>) -> agent;
+key(user_agent, <<"kind">>) -> kind;
+key(user_agent, <<"verdict">>) -> verdict;
 key(proxy, <<"provider">>) -> provider;
 key(proxy, <<"provider_name">>) -> provider_name;
 key(proxy, <<"first_seen">>) -> first_seen;
@@ -837,6 +873,7 @@ nested(lookup, <<"mobproxy">>) -> proxy;
 nested(lookup, <<"pubproxy">>) -> pubproxy;
 nested(lookup, <<"hosting">>) -> class;
 nested(lookup, <<"cdn">>) -> class;
+nested(lookup, <<"bot">>) -> bot;
 nested(lookup, <<"carrier">>) -> carrier;
 nested(lookup, <<"satellite">>) -> satellite;
 nested(lookup, <<"ssh">>) -> ssh;
@@ -851,6 +888,7 @@ nested(lookup, <<"abuse">>) -> abuse;
 nested(lookup, <<"whois">>) -> whois;
 nested(lookup, <<"rwhois">>) -> rwhois;
 nested(lookup, <<"hosted_domains">>) -> hosted_domains;
+nested(lookup, <<"user_agent">>) -> user_agent;
 nested(asn_lookup, <<"prefixes">>) -> asn_prefix;
 nested(asn_lookup, <<"hosted_domains">>) -> hosted_domains;
 nested(domain_lookup, <<"dns">>) -> dns;

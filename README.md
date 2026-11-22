@@ -18,7 +18,7 @@ Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything t
 
 ## Usage
 
-**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn`, `is_anycast`, `is_carrier`, `is_satellite`, the five service flags, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
+**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn`, `is_anycast`, `is_carrier`, `is_satellite`, `is_bot`, the five service flags, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
 
 ```erlang
 Client = internetdata:new(),
@@ -33,7 +33,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, whi
 
 ### With an API key
 
-Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. The plans differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
+Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. The plans differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -330,7 +330,7 @@ Each redirect URI must be https on a public host name, or http on a loopback add
 
 ### Absent is not false
 
-Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and inside `location`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and `bot`, though it answers `is_bot`, and inside `location`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
 
 ```erlang
 maps:get(is_vpn, Result, false).          % when you only want the flag
