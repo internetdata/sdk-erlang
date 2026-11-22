@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.19.0 - 2026-11-22
+
+### Features
+
+- Read is_bot on every plan, and whose bot uses the address on a paid plan ([`4179215`](https://github.com/internetdata/sdk-erlang/commit/41792158c0aeb6dc95d622313d31fd57fe2ff5e0))
+
 ## 1.18.1 - 2026-11-21
 
 ### Fixes
