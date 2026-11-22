@@ -271,7 +271,7 @@ insert(State, Ip, Result) ->
     evict(State),
     State#state{seq = Seq}.
 
-%% A reduced answer, a spent trial's or a reached cap's, ends with a new UTC day
+%% A reduced answer, a spent trial's or a reached cap's, ends with a new UTC month
 %% or a raised cap, so it stays a minute at most rather than the TTL. It is still
 %% cached, or a busy process would send every repeat of an address to the API.
 life_ms(#{trial_expired := true}, TtlMs) -> min(TtlMs, ?REDUCED_TTL_MS);
