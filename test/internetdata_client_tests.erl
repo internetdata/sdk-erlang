@@ -323,6 +323,7 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
         {Ip, L#{<<"is_bogon">> => <<"false">>}}, {Ip, L#{<<"ip">> => null}},
         {Ip, maps:remove(<<"location">>, L)}, {Ip, maps:remove(<<"hostname">>, L)},
         {Ip, maps:remove(<<"is_dns_resolver">>, L)}, {Ip, maps:remove(<<"relay">>, L)},
+        {Ip, maps:remove(<<"is_bot">>, L)}, {Ip, L#{<<"is_bot">> => null}},
         {Ip, L#{<<"location">> => Loc#{<<"country">> => 1}}},
         {Ip, L#{<<"location">> => Loc#{<<"latitude">> => <<"1.5">>}}},
         {Ip, L#{<<"location">> => maps:remove(<<"timezone">>, Loc)}},

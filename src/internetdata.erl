@@ -1122,7 +1122,7 @@ lookup_shape() ->
               {<<"is_resproxy">>, boolean, false}, {<<"is_dcproxy">>, boolean, false},
               {<<"is_mobproxy">>, boolean, false}, {<<"is_pubproxy">>, boolean, false},
               {<<"is_hosting">>, boolean, false}, {<<"is_cdn">>, boolean, false},
-              {<<"is_bot">>, boolean, false}, {<<"is_anycast">>, boolean, true}, {<<"is_carrier">>, boolean, true},
+              {<<"is_bot">>, boolean, true}, {<<"is_anycast">>, boolean, true}, {<<"is_carrier">>, boolean, true},
               {<<"is_satellite">>, boolean, true}, {<<"is_ssh">>, boolean, true},
               {<<"is_smtp">>, boolean, true}, {<<"is_web">>, boolean, true},
               {<<"is_dns_resolver">>, boolean, true}, {<<"is_bittorrent">>, boolean, true},
