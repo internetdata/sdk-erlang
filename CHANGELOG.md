@@ -2,6 +2,13 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.19.1 - 2026-11-23
+
+### Fixes
+
+- Refuse a lookup answer without is_bot, which every answer carries ([`22905e0`](https://github.com/internetdata/sdk-erlang/commit/22905e00c92ad458a6524eb61ebd42320d9dc0e4))
+- Re-pin the spec to 2026.11.22: a bot's provider for an unverified address ([`2086769`](https://github.com/internetdata/sdk-erlang/commit/20867696b28f7ee3bf92c9a0a837c91f6b2000bc))
+
 ## 1.19.0 - 2026-11-22
 
 ### Features
