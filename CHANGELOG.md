@@ -2,6 +2,16 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.20.0 - 2026-11-24
+
+### Features
+
+- Match a condition on a list member when any element matches ([`a5b6068`](https://github.com/internetdata/sdk-erlang/commit/a5b60681569e8936ee359e31aa1ab241b1751433))
+
+### Fixes
+
+- Re-pin the spec to 2026.11.23: refuse a seen day that is no date ([`394fce8`](https://github.com/internetdata/sdk-erlang/commit/394fce8892d6a7e9f3a4a5a837a3e47e40368e23))
+
 ## 1.19.1 - 2026-11-23
 
 ### Fixes
