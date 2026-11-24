@@ -334,6 +334,48 @@ every_standing_and_license_type_survives_the_mapper_test() ->
                  lists:usort([maps:get(license_type, D) || D <- Databases])),
     internetdata_stub:stop(Stub).
 
+%% A vocabulary in an ANSWER is the API's to extend, so each case's value, which
+%% no published list holds, comes back as served. Each `expect' key is a path of
+%% wire names through the answer, a number indexing a list; the list calls'
+%% first segment is the envelope member they unwrap.
+vocabulary_values_come_back_as_served_test_() ->
+    [{binary_to_list(Name), fun() -> assert_vocabulary(Case) end}
+     || #{<<"name">> := Name} = Case <- maps:get(<<"cases">>, corpus(<<"vocabulary">>))].
+
+assert_vocabulary(#{<<"call">> := Call, <<"answer">> := Answer, <<"expect">> := Expect}) ->
+    {Path, Envelope, Run} = vocabulary_call(Call),
+    Stub = internetdata_stub:start(#{Path => #{body => Answer}}),
+    Client = client(Stub, #{}),
+    {ok, Result} = Run(Client),
+    Read = case Envelope of
+               none -> Result;
+               _ -> #{Envelope => Result}
+           end,
+    maps:foreach(fun(At, Want) ->
+        ?assertEqual({At, Want}, {At, read_at(binary:split(At, <<".">>, [global]), Read)})
+    end, Expect),
+    internetdata_stub:stop(Stub).
+
+vocabulary_call(<<"myEntitlement">>) ->
+    {<<"/api/v1/entitlement">>, none, fun internetdata:my_entitlement/1};
+vocabulary_call(<<"listDatabases">>) ->
+    {?LIST_PATH, <<"databases">>, fun internetdata:database_list/1};
+vocabulary_call(<<"listDownloads">>) ->
+    {<<"/api/v2/database/downloads">>, <<"downloads">>, fun internetdata:database_downloads/1}.
+
+%% A list is indexed from 0, as the corpus writes it; a map is read by the
+%% member's atom, since every documented member decodes to one.
+read_at([], Value) ->
+    Value;
+read_at([Segment | Rest], List) when is_list(List) ->
+    read_at(Rest, lists:nth(binary_to_integer(Segment) + 1, List));
+read_at([Segment | Rest], Map) when is_map(Map) ->
+    Value = case maps:find(Segment, Map) of
+                {ok, V} -> V;
+                error -> maps:get(atom(Segment), Map)
+            end,
+    read_at(Rest, Value).
+
 every_format_reaches_the_wire_as_written_test_() ->
     [{binary_to_list(Format), fun() -> assert_format(Format) end}
      || Format <- corpus(<<"formats">>)].
