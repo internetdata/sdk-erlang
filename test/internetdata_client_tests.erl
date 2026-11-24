@@ -384,6 +384,79 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
           fun() -> assert_unreadable(Path, Body, maps:get(Path, Calls)) end}
      end || {Path, Wire} <- Cases].
 
+%% Every seen day is RFC 3339's full-date on a real day from spec 2026.11.23, so
+%% one that is not is a retried server_error at every depth. Through 1.19.1 each
+%% was checked as a binary alone and came back as served.
+a_seen_day_that_is_no_date_is_a_retried_server_error_test_() ->
+    Bad = [<<"x">>, <<>>, <<"2026-02-30">>, <<"2026-11-5">>, <<"2026-11-13T00:00:00Z">>, <<" 2026-11-13">>,
+           <<"2026-11-13\n">>],
+    Calls = lookup_calls(),
+    [begin
+         Body = iolist_to_binary(json:encode(put_at(At, Value, Wire))),
+         {binary_to_list(iolist_to_binary([Path, " ", lists:join(".", [to_bin(K) || K <- At]), " ",
+                                           io_lib:format("~p", [Value])])),
+          fun() -> assert_unreadable(Path, Body, maps:get(Path, Calls)) end}
+     end || {Path, Wire, At} <- seen_days(), Value <- Bad].
+
+%% The three seen members that may be empty stay strings, and each seen day is
+%% handed back as the binary served.
+the_seen_strings_that_may_be_empty_stay_answers_test() ->
+    [{_, L, _} | _] = seen_days(),
+    Lookup = L#{<<"bittorrent">> => (maps:get(<<"bittorrent">>, L))#{<<"last_reachable">> => <<>>}},
+    D = domain_ok(),
+    Domain = D#{<<"web">> => (maps:get(<<"web">>, D))#{<<"last_seen">> => <<>>}},
+    Stub = internetdata_stub:start(#{<<"/1.1.1.1">> => #{body => Lookup},
+                                     <<"/domain/example.com">> => #{body => Domain}}),
+    Client = client(Stub),
+    {ok, R} = internetdata:lookup(Client, <<"1.1.1.1">>),
+    ?assertMatch(#{last_usable := <<>>, last_seen := <<"2026-11-13">>}, maps:get(pubproxy, R)),
+    ?assertMatch(#{last_reachable := <<>>, first_seen := <<"2026-06-01">>}, maps:get(bittorrent, R)),
+    {ok, Dom} = internetdata:lookup_domain(Client, <<"example.com">>),
+    ?assertMatch(#{last_seen := <<>>}, maps:get(web, Dom)),
+    internetdata_stub:stop(Stub).
+
+%% Each member the spec gives `format: date' in a lookup answer, by its wire path.
+seen_days() ->
+    Seen = #{<<"first_seen">> => <<"2026-06-01">>, <<"last_seen">> => <<"2026-11-13">>},
+    L0 = lookup_ok(),
+    L = L0#{<<"is_bot">> => true, <<"is_ssh">> => true, <<"is_smtp">> => true, <<"is_dns_resolver">> => true,
+            <<"is_bittorrent">> => true,
+            <<"bot">> => Seen#{<<"provider">> => <<"google">>, <<"verified">> => true},
+            <<"ssh">> => Seen#{<<"port">> => 22}, <<"smtp">> => Seen#{<<"port">> => 25},
+            <<"dns_resolver">> => Seen#{<<"port">> => 53},
+            <<"bittorrent">> => Seen#{<<"days_seen">> => 3, <<"last_reachable">> => <<"2026-11-12">>}},
+    D0 = domain_ok(),
+    #{<<"dns">> := Dns} = D0,
+    D = D0#{<<"is_disposable">> => true, <<"disposable">> => Seen#{<<"confidence">> => <<"high">>},
+            <<"dns">> => Dns#{<<"cname">> => [#{<<"target">> => <<"example.net">>, <<"last_seen">> => <<"2026-11-08">>}]}},
+    Ip = <<"/1.1.1.1">>,
+    Dom = <<"/domain/example.com">>,
+    [{Ip, L, [<<"vpn">>, <<"last_seen">>]}, {Ip, L, [<<"hosting">>, <<"last_seen">>]},
+     {Ip, L, [<<"dcproxy">>, <<"first_seen">>]}, {Ip, L, [<<"dcproxy">>, <<"last_seen">>]},
+     {Ip, L, [<<"pubproxy">>, <<"last_seen">>]},
+     {Ip, L, [<<"bot">>, <<"first_seen">>]}, {Ip, L, [<<"bot">>, <<"last_seen">>]},
+     {Ip, L, [<<"ssh">>, <<"first_seen">>]}, {Ip, L, [<<"ssh">>, <<"last_seen">>]},
+     {Ip, L, [<<"smtp">>, <<"first_seen">>]}, {Ip, L, [<<"smtp">>, <<"last_seen">>]},
+     {Ip, L, [<<"web">>, 0, <<"first_seen">>]}, {Ip, L, [<<"web">>, 0, <<"last_seen">>]},
+     {Ip, L, [<<"dns_resolver">>, <<"first_seen">>]}, {Ip, L, [<<"dns_resolver">>, <<"last_seen">>]},
+     {Ip, L, [<<"bittorrent">>, <<"first_seen">>]}, {Ip, L, [<<"bittorrent">>, <<"last_seen">>]},
+     {<<"/myip">>, L, [<<"vpn">>, <<"last_seen">>]},
+     {<<"/asn/9009">>, asn_ok(), [<<"prefixes">>, 0, <<"first_seen">>]},
+     {Dom, D, [<<"dns">>, <<"a">>, 0, <<"last_seen">>]}, {Dom, D, [<<"dns">>, <<"mx">>, 0, <<"last_seen">>]},
+     {Dom, D, [<<"dns">>, <<"ns">>, 0, <<"last_seen">>]}, {Dom, D, [<<"dns">>, <<"cname">>, 0, <<"last_seen">>]},
+     {Dom, D, [<<"disposable">>, <<"first_seen">>]}, {Dom, D, [<<"disposable">>, <<"last_seen">>]}].
+
+put_at([Key], Value, Map) when is_map(Map) ->
+    Map#{Key => Value};
+put_at([Key | Rest], Value, Map) when is_map(Map) ->
+    Map#{Key => put_at(Rest, Value, maps:get(Key, Map))};
+put_at([Index | Rest], Value, List) when is_list(List) ->
+    {Before, [Element | After]} = lists:split(Index, List),
+    Before ++ [put_at(Rest, Value, Element) | After].
+
+to_bin(K) when is_binary(K) -> K;
+to_bin(K) when is_integer(K) -> integer_to_binary(K).
+
 lookup_calls() ->
     #{<<"/1.1.1.1">> => fun(C) -> internetdata:lookup(C, <<"1.1.1.1">>) end,
       <<"/myip">> => fun internetdata:my_ip/1,
