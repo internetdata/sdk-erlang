@@ -15,7 +15,9 @@
 %%
 %% A value may be a scalar (equality, strings without regard to case), a list
 %% meaning any-of, a map of `gte'/`gt'/`lte'/`lt' bounding a number, or a nested
-%% condition. A member set to `false', `null' or `undefined' is ignored entirely
+%% condition. Against a member the answer holds as a list it matches when any
+%% one element does: `#{web => #{port => 443}}', `#{pubproxy => #{protocols =>
+%% <<"socks5">>}}'. A member set to `false', `null' or `undefined' is ignored entirely
 %% - a condition states the positive signals you act on, so there is no way to
 %% write "block when this is false", which would otherwise read as blocking
 %% everybody.
@@ -148,6 +150,11 @@ matches_value(_Want, absent) ->
 %% nothing rather than comparing as the atom it happens to be.
 matches_value(Want, _Got) when Want =:= undefined; Want =:= null ->
     false;
+%% A member the answer holds as a list (`web''s rows, `pubproxy.protocols')
+%% matches when any one element does, so an object term must match ONE element
+%% whole. JSON strings decode to binaries, so a list here is always an array.
+matches_value(Want, Got) when is_list(Got) ->
+    lists:any(fun(Element) -> matches_value(Want, Element) end, Got);
 matches_value(Want, Got) when is_map(Want) ->
     case is_bound(Want) of
         true -> matches_bound(Want, Got);
