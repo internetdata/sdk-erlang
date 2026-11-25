@@ -2,6 +2,17 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.21.0 - 2026-11-25
+
+### Features
+
+- Send the user agent of the request you are deciding on, and let a verified crawler through the middleware ([`b4924bf`](https://github.com/internetdata/sdk-erlang/commit/b4924bfd41ec72d4fa0044bb6338237bae2842c9))
+
+### Fixes
+
+- Refuse an option no call could use where it is given: the cache's, a downloads limit, the middleware's ([`cca87f9`](https://github.com/internetdata/sdk-erlang/commit/cca87f9412e3ac70027f5ed7f372db6bf1904420))
+- Re-pin the spec to 2026.11.25, and test an upper bound on a member the plan lacks ([`b74e54e`](https://github.com/internetdata/sdk-erlang/commit/b74e54e49a088c6780e0161a7eca5f4235177313))
+
 ## 1.20.0 - 2026-11-24
 
 ### Features
