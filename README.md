@@ -33,7 +33,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, whi
 
 ### With an API key
 
-Every paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. The plans differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
+A paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. Its quotas differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -73,8 +73,8 @@ Same answer `lookup` would give for that address, and the same cost against your
 {ok, Entitlement} = internetdata:my_entitlement(Client),
 Plan = maps:get(plan, Entitlement),
 Usage = maps:get(usage, Entitlement),
-maps:get(key, Plan).           % <<"max">>
-maps:get(name, Plan).          % <<"Max">>, the name to show
+maps:get(key, Plan).           % <<"data_4">>
+maps:get(name, Plan).          % <<"Data">>, the name to show
 maps:get(requests, Usage).     % 580
 maps:get(window_end, Usage).   % when the allowance resets
 ```
