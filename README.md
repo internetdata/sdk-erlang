@@ -33,7 +33,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, whi
 
 ### With an API key
 
-A paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. Its quotas differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
+A paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the `user_agent` verdict on a user agent you send with the lookup, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. Its quotas differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -46,6 +46,20 @@ maps:get(city, maps:get(location, Result)).      % <<"Vienna">>, on a paid plan
 
 A detail map that is present but empty (`#{}`, or `[]` for `web`) means the flag above it is false. A populated one always carries every one of its keys.
 
+### The user agent of the request you are deciding on
+
+Pass the `User-Agent` of the request you are deciding on, and with every field (a paid plan, or the trial) the answer carries `user_agent`: the agent it names, what kind of client it says it is, and whether this address bears it out. A crawler claiming to be Googlebot from an address Google does not vouch for comes back `spoofed`:
+
+```erlang
+{ok, Result} = internetdata:lookup(Client, <<"66.249.66.1">>,
+                                   #{user_agent => <<"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)">>}),
+#{agent := Agent, kind := Kind, verdict := Verdict} = maps:get(user_agent, Result).
+%% Agent = <<"Googlebot">>, Kind = <<"bot">>,
+%% Verdict = <<"verified">> | <<"spoofed">> | <<"unverifiable">> | <<"not_bot">>
+```
+
+`verified` means the agent's operator vouches for this address, `spoofed` that it does not (or the address posed as the bot before), `unverifiable` that the agent is a bot nothing can confirm, and `not_bot` that it is a browser, an app or a script. `user_agent` is absent when no agent was sent, on Unlimited, and on a private or reserved address, which is still answered locally. An empty agent is none, and one longer than 1024 characters is sent whole; the API reads its first 1024. An answer with an agent is cached apart from the address's plain answer and from another agent's. `my_ip/2` takes `user_agent` too, and `lookup_batch/3` takes `user_agents`, below.
+
 ### An AS or a domain
 
 ```erlang
@@ -56,7 +70,7 @@ maps:get(name, As).                              % <<"M247 Europe SRL">>
 maps:get(has_mx, Domain).                        % whether it has an MX record
 ```
 
-Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record, the prefixes it announces, its rank, Tier 1 flag, upstreams, peers and downstreams, and the domains it hosts, and the domain's records, the network announcing each of its addresses, the other domains on its first IPv4 address, its organization's IP ranges, whether it is disposable, what its home page says and links to, and the domains whose home page redirects or links to it. Neither answer is cached, and both calls take the options `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries. `lookup` takes addresses alone, and answers anything else `bad_request` without sending it.
+Unlimited answers an AS's registration, and a domain's registration and which record types it has. A paid plan adds the AS's ASN Whois record, the prefixes it announces, its rank, Tier 1 flag, upstreams, peers and downstreams, and the domains it hosts, and the domain's records, the network announcing each of its addresses, the other domains on its first IPv4 address, its organization's IP ranges, whether it is disposable, what its home page says and links to, and the domains whose home page redirects or links to it. Neither answer is cached, and both calls take `retries` and `timeout_ms` as `lookup/3` does. An AS answer's `whois` is keyed by the registry's own field names, so its keys stay binaries. `lookup` takes addresses alone, and answers anything else `bad_request` without sending it.
 
 ### Your own address
 
@@ -100,6 +114,13 @@ How many chunks are in flight at once, how many times a failed chunk is retried,
 
 ```erlang
 Results = internetdata:lookup_batch(Client, ManyIps, #{concurrency => 4, retries => 4, timeout_ms => 5000}).
+```
+
+`user_agents` maps an address, written as it is in your list, to the user agent to send with it, and each of those addresses' answers carries its `user_agent` verdict as a single lookup's does:
+
+```erlang
+Results = internetdata:lookup_batch(Client, [<<"66.249.66.1">>, <<"8.8.8.8">>],
+                                    #{user_agents => #{<<"66.249.66.1">> => GooglebotAgent}}).
 ```
 
 ### Caching
