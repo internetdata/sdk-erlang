@@ -1095,6 +1095,7 @@ download() ->
 %% The lookup answers' shapes, by the same rule. A detail is `{}' under a false
 %% flag, and the spec requires none of its members; a plan's own members are
 %% optional within the objects every answer carries, which are always whole.
+%% `plan' marks the eight flags only a paid plan or the trial answers: absent, never null.
 %% Every seen day is a `date' (spec 2026.11.23) but three that may be empty:
 %% `pubproxy.last_usable', `bittorrent.last_reachable' and a domain's `web.last_seen'.
 lookup_shape() ->
@@ -1174,10 +1175,10 @@ lookup_shape() ->
               {<<"is_resproxy">>, boolean, false}, {<<"is_dcproxy">>, boolean, false},
               {<<"is_mobproxy">>, boolean, false}, {<<"is_pubproxy">>, boolean, false},
               {<<"is_hosting">>, boolean, false}, {<<"is_cdn">>, boolean, false},
-              {<<"is_bot">>, boolean, true}, {<<"is_anycast">>, boolean, true}, {<<"is_carrier">>, boolean, true},
-              {<<"is_satellite">>, boolean, true}, {<<"is_ssh">>, boolean, true},
-              {<<"is_smtp">>, boolean, true}, {<<"is_web">>, boolean, true},
-              {<<"is_dns_resolver">>, boolean, true}, {<<"is_bittorrent">>, boolean, true},
+              {<<"is_bot">>, boolean, plan}, {<<"is_anycast">>, boolean, true},
+              {<<"is_carrier">>, boolean, plan}, {<<"is_satellite">>, boolean, plan},
+              {<<"is_ssh">>, boolean, plan}, {<<"is_smtp">>, boolean, plan}, {<<"is_web">>, boolean, plan},
+              {<<"is_dns_resolver">>, boolean, plan}, {<<"is_bittorrent">>, boolean, plan},
               {<<"vpn">>, Class, false}, {<<"tor">>, Class, true}, {<<"relay">>, Class, true},
               {<<"resproxy">>, Proxy, false}, {<<"dcproxy">>, Proxy, false}, {<<"mobproxy">>, Proxy, false},
               {<<"pubproxy">>, Pubproxy, false}, {<<"hosting">>, Class, false}, {<<"cdn">>, Class, false},

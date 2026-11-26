@@ -121,8 +121,17 @@ assert_shape(#{<<"call">> := Call, <<"target">> := Target, <<"status">> := Statu
          end
      end || K <- maps:get(<<"objects">>, Expect)],
     %% The whole point of the corpus: a plan-gated member the server did not send
-    %% must be ABSENT, which is a different answer from present-and-false.
-    [?assertEqual({K, error}, {K, maps:find(atom(K), Result)}) || K <- maps:get(<<"absent">>, Expect)],
+    %% must be ABSENT, which is a different answer from present-and-false. The held
+    %% flags are the exception: they keep their non-optional public type until the
+    %% next major, so an absent one reads false, and `raw' still shows it unsent.
+    Held = [atom_to_binary(F) || F <- internetdata_stub:held_flags()],
+    [case lists:member(K, Held) of
+         true ->
+             ?assertEqual({K, {ok, false}}, {K, maps:find(atom(K), Result)}),
+             ?assertNot(maps:is_key(K, maps:get(raw, Result)), K);
+         false ->
+             ?assertEqual({K, error}, {K, maps:find(atom(K), Result)})
+     end || K <- maps:get(<<"absent">>, Expect)],
     maps:foreach(fun(Obj, Keys) ->
         Got = maps:get(atom(Obj), Result),
         [?assertEqual({Obj, K, error}, {Obj, K, maps:find(atom(K), Got)}) || K <- Keys]

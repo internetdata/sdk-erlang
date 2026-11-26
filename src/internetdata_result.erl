@@ -20,6 +20,11 @@
 %% `maps:get(is_hosting, Result, undefined)' is how you tell them apart. A detail
 %% map that is present but empty (`#{}', Web IP's `[]') means the flag above it
 %% is false. `raw' holds the answer as the wire carried it.
+%%
+%% <b>The exception, until the next major:</b> `is_carrier', `is_satellite', `is_ssh',
+%% `is_smtp', `is_web', `is_dns_resolver' and `is_bittorrent' are always in the map, `false'
+%% on a plan that does not answer them (`is_bot' is absent there, as it was typed). Whether
+%% the plan answered one is `maps:is_key(&lt;&lt;"is_ssh"&gt;&gt;, maps:get(raw, Result))'.
 -module(internetdata_result).
 
 -export([from_wire/1, bogon/1, asn/1, domain/1, entitlement/1]).
@@ -406,10 +411,15 @@
 %%
 %% Folding over what the body HAS is what preserves absent-versus-false: a key
 %% the server did not send cannot appear in the fold, so no plan-gated member
-%% can be invented as `false'.
+%% can be invented as `false'. The seven flags `:=' in `result()' are the exception.
 -spec from_wire(map()) -> result().
 from_wire(Body) when is_map(Body) ->
-    (decode(lookup, Body))#{raw => Body}.
+    maps:merge(maps:from_keys(held(), false), (decode(lookup, Body))#{raw => Body}).
+
+%% Only a paid plan or the trial answers these, but `result()' types them `:=', so they are held at
+%% that type until the next major: Unlimited reads false for each, and `raw' tells it apart.
+held() ->
+    [is_carrier, is_satellite, is_ssh, is_smtp, is_web, is_dns_resolver, is_bittorrent].
 
 %% @doc The answer a bogon gets, in the full shape the API serves on a paid plan:
 %% every flag false, every detail empty (Web IP's list empty), every key of

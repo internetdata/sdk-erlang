@@ -322,8 +322,7 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
     Cases = [
         {Ip, L#{<<"is_bogon">> => <<"false">>}}, {Ip, L#{<<"ip">> => null}},
         {Ip, maps:remove(<<"location">>, L)}, {Ip, maps:remove(<<"hostname">>, L)},
-        {Ip, maps:remove(<<"is_dns_resolver">>, L)}, {Ip, maps:remove(<<"relay">>, L)},
-        {Ip, maps:remove(<<"is_bot">>, L)}, {Ip, L#{<<"is_bot">> => null}},
+        {Ip, maps:remove(<<"is_anycast">>, L)}, {Ip, maps:remove(<<"relay">>, L)},
         {Ip, L#{<<"location">> => Loc#{<<"country">> => 1}}},
         {Ip, L#{<<"location">> => Loc#{<<"latitude">> => <<"1.5">>}}},
         {Ip, L#{<<"location">> => maps:remove(<<"timezone">>, Loc)}},
@@ -376,7 +375,7 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
         {?ENTITLEMENT_PATH, E#{<<"usage">> => Usage#{<<"window_start">> => <<"x">>}}},
         {?ENTITLEMENT_PATH, E#{<<"apikey">> => Key#{<<"expires">> => <<"monday">>}}},
         {?ENTITLEMENT_PATH, maps:remove(<<"plan">>, E)}
-    ],
+    ] ++ [{Ip, L#{Flag => Value}} || Flag <- paid_flag_names(), Value <- [null, <<"false">>, 1]],
     Calls = lookup_calls(),
     [begin
          Body = iolist_to_binary(json:encode(Wire)),
@@ -1499,6 +1498,64 @@ a_cache_ends_with_the_process_that_built_it_test() ->
                                                 after 1000 -> still_running end})
      end || Reason <- [normal, shutdown, kill]].
 
+%% Only a paid plan or the trial answers these eight, so an answer without any of them is a
+%% real one. The seven typed `:=' read false, held at that type until the next major, and
+%% `is_bot', typed `=>', is absent; `raw' carries what the wire did.
+an_answer_without_the_paid_flags_is_read_test() ->
+    Wire = internetdata_stub:answer(<<"1.1.1.1">>),
+    ?assertEqual([], [Flag || Flag <- paid_flag_names(), maps:is_key(Flag, Wire)]),
+    Stub = internetdata_stub:start(#{<<"/1.1.1.1">> => #{body => Wire}, <<"/myip">> => #{body => Wire}}),
+    Client = internetdata:new(#{http => internetdata_stub:http(Stub), retries => 0, cache => false}),
+    [begin
+         {ok, Result} = Call(Client),
+         assert_paid_flags_unanswered(Result)
+     end || Call <- [fun(C) -> internetdata:lookup(C, <<"1.1.1.1">>) end, fun internetdata:my_ip/1]],
+    ?assertEqual(2, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+an_answer_without_the_paid_flags_is_read_in_a_batch_test() ->
+    Body = iolist_to_binary(json:encode(#{<<"results">> => #{
+        <<"1.1.1.1">> => internetdata_stub:answer(<<"1.1.1.1">>),
+        <<"8.8.8.8">> => internetdata_stub:answer(<<"8.8.8.8">>)}})),
+    Http = fun(_) -> {ok, #{status => 200, headers => [], body => Body}} end,
+    Client = internetdata:new(#{api_key => <<"k">>, retries => 0, http => Http, cache => false}),
+    Answers = internetdata:lookup_batch(Client, [<<"1.1.1.1">>, <<"8.8.8.8">>]),
+    ?assertEqual([<<"1.1.1.1">>, <<"8.8.8.8">>], lists:sort(maps:keys(Answers))),
+    [begin
+         {ok, Result} = maps:get(Ip, Answers),
+         assert_paid_flags_unanswered(Result)
+     end || Ip <- [<<"1.1.1.1">>, <<"8.8.8.8">>]].
+
+assert_paid_flags_unanswered(Result) ->
+    [?assertEqual({Flag, {ok, false}}, {Flag, maps:find(Flag, Result)}) || Flag <- internetdata_stub:held_flags()],
+    ?assertEqual(error, maps:find(is_bot, Result)),
+    [?assertNot(maps:is_key(atom_to_binary(Flag), maps:get(raw, Result))) || Flag <- [is_bot | internetdata_stub:held_flags()]].
+
+%% A flag a plan does answer is read as served, true or false.
+the_paid_flags_are_read_when_the_plan_answers_them_test() ->
+    Answered = fun(Value) -> maps:merge(internetdata_stub:answer(<<"1.1.1.1">>),
+                                        maps:from_keys(paid_flag_names(), Value)) end,
+    [begin
+         Stub = internetdata_stub:start(#{<<"/1.1.1.1">> => #{body => Answered(Value)}}),
+         {ok, Result} = internetdata:lookup(client(Stub), <<"1.1.1.1">>),
+         [?assertEqual({Flag, {ok, Value}}, {Flag, maps:find(Flag, Result)}) || Flag <- [is_bot | internetdata_stub:held_flags()]],
+         internetdata_stub:stop(Stub)
+     end || Value <- [true, false]].
+
+%% Present but of another type, one of the eight is that address's error alone in a batch.
+a_paid_flag_of_the_wrong_type_fails_that_batch_entry_alone_test() ->
+    Entry = fun(Ip, Flag, Value) -> (internetdata_stub:answer(Ip))#{Flag => Value} end,
+    Body = iolist_to_binary(json:encode(#{<<"results">> => #{
+        <<"1.1.1.1">> => Entry(<<"1.1.1.1">>, <<"is_ssh">>, <<"false">>),
+        <<"8.8.8.8">> => Entry(<<"8.8.8.8">>, <<"is_bot">>, null),
+        <<"9.9.9.9">> => Entry(<<"9.9.9.9">>, <<"is_web">>, true)}})),
+    Http = fun(_) -> {ok, #{status => 200, headers => [], body => Body}} end,
+    Client = internetdata:new(#{api_key => <<"k">>, retries => 0, http => Http, cache => false}),
+    Answers = internetdata:lookup_batch(Client, [<<"1.1.1.1">>, <<"8.8.8.8">>, <<"9.9.9.9">>]),
+    ?assertMatch({error, #{kind := server_error, status := 200}}, maps:get(<<"1.1.1.1">>, Answers)),
+    ?assertMatch({error, #{kind := server_error, status := 200}}, maps:get(<<"8.8.8.8">>, Answers)),
+    ?assertMatch({ok, #{is_web := true}}, maps:get(<<"9.9.9.9">>, Answers)).
+
 %% A batch entry of the wrong shape is that address's error alone, sent once.
 a_batch_entry_of_the_wrong_shape_fails_that_address_alone_test() ->
     Sent = counters:new(1, []),
@@ -1648,6 +1705,9 @@ download() ->
 client(Stub) ->
     internetdata:new(#{api_key => <<"k">>, http => internetdata_stub:http(Stub)}).
 
+paid_flag_names() ->
+    maps:keys(internetdata_stub:paid_flags()).
+
 addr(N) ->
     list_to_binary(io_lib:format("9.~b.~b.~b", [1 + N div 65536, (N div 256) rem 256, N rem 256])).
 
@@ -1666,7 +1726,7 @@ lookup_ok() ->
             <<"cert_subject_cn">> => <<"cn">>, <<"cert_subject_o">> => <<"o">>, <<"cert_issuer_dn">> => <<"dn">>,
             <<"cert_browser_trusted">> => true, <<"tls_version">> => <<"TLSv1.3">>,
             <<"first_seen">> => <<"2026-08-12">>, <<"last_seen">> => <<"2026-10-31">>},
-    Wire = internetdata_stub:answer(<<"1.1.1.1">>),
+    Wire = maps:merge(internetdata_stub:answer(<<"1.1.1.1">>), internetdata_stub:paid_flags()),
     Wire#{<<"is_vpn">> => true, <<"is_resproxy">> => false, <<"is_dcproxy">> => true, <<"is_mobproxy">> => false,
           <<"is_pubproxy">> => true, <<"is_hosting">> => true, <<"is_cdn">> => false, <<"is_web">> => true,
           <<"vpn">> => Class, <<"hosting">> => Class, <<"cdn">> => #{}, <<"resproxy">> => #{},

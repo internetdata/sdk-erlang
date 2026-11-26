@@ -14,11 +14,11 @@ It tells you what every database InternetData publishes says about an IP address
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.21"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.22"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
-**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn`, `is_anycast`, `is_carrier`, `is_satellite`, `is_bot`, the five service flags, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
+**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn`, `is_anycast`, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
 
 ```erlang
 Client = internetdata:new(),
@@ -351,7 +351,9 @@ Each redirect URI must be https on a public host name, or http on a loopback add
 
 ### Absent is not false
 
-Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn` and the proxy flags with the detail behind them, and `bot`, though it answers `is_bot`, and inside `location`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn`, the proxy flags with the detail behind them, `is_bot`, `is_carrier`, `is_satellite`, `is_ssh`, `is_smtp`, `is_web`, `is_dns_resolver`, `is_bittorrent` and the detail behind each, and inside `location`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+
+One exception, until the next major release: `is_carrier`, `is_satellite`, `is_ssh`, `is_smtp`, `is_web`, `is_dns_resolver` and `is_bittorrent` are always in the result map, and read `false` where the plan does not answer them. `maps:is_key(<<"is_ssh">>, maps:get(raw, Result))` tells whether it did. `is_bot` is simply absent there.
 
 ```erlang
 maps:get(is_vpn, Result, false).          % when you only want the flag

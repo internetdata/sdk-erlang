@@ -10,7 +10,8 @@
 %% overlap and the PEAK number in flight is a measurement rather than a guess.
 -module(internetdata_stub).
 
--export([start/1, start/2, stop/1, http/1, calls/1, peak/1, headers_seen/1, request/2, answer/1]).
+-export([start/1, start/2, stop/1, http/1, calls/1, peak/1, headers_seen/1, request/2, answer/1,
+         paid_flags/0, held_flags/0]).
 
 start(Routes) ->
     start(Routes, 0).
@@ -43,14 +44,22 @@ answer(Ip) ->
     Location = maps:from_keys([<<"continent">>, <<"continent_name">>, <<"country">>, <<"country_name">>,
                                <<"timezone">>, <<"currency_code">>, <<"currency_name">>,
                                <<"currency_symbol">>, <<"flag_emoji">>, <<"flag_unicode">>], <<>>),
-    Flags = maps:from_keys([<<"is_bogon">>, <<"is_tor">>, <<"is_relay">>, <<"is_bot">>, <<"is_anycast">>,
-                            <<"is_carrier">>, <<"is_satellite">>, <<"is_ssh">>, <<"is_smtp">>, <<"is_web">>,
-                            <<"is_dns_resolver">>, <<"is_bittorrent">>], false),
+    Flags = maps:from_keys([<<"is_bogon">>, <<"is_tor">>, <<"is_relay">>, <<"is_anycast">>], false),
     Flags#{<<"ip">> => Ip, <<"tor">> => #{}, <<"relay">> => #{}, <<"location">> => Location,
            <<"asn">> => #{<<"asn">> => 0, <<"name">> => <<>>, <<"domain">> => <<>>, <<"type">> => <<>>,
                           <<"prefix">> => <<>>},
            <<"company">> => #{<<"name">> => <<>>, <<"domain">> => <<>>},
            <<"hostname">> => <<>>, <<"abuse">> => #{<<"email">> => <<>>}}.
+
+%% @doc The eight flags a paid plan or the trial answers and Unlimited does not.
+paid_flags() ->
+    maps:from_keys([<<"is_bot">>, <<"is_carrier">>, <<"is_satellite">>, <<"is_ssh">>, <<"is_smtp">>,
+                    <<"is_web">>, <<"is_dns_resolver">>, <<"is_bittorrent">>], false).
+
+%% @doc The flags of those eight that `result()' types `:=': held at that type until the next
+%% major, so a plan that does not answer one reads false. `is_bot' is typed `=>' and reads absent.
+held_flags() ->
+    [is_carrier, is_satellite, is_ssh, is_smtp, is_web, is_dns_resolver, is_bittorrent].
 
 request(Pid, #{url := Url, headers := Headers} = Request) ->
     Ref = make_ref(),
