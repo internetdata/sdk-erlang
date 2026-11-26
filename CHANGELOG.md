@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.22.0 - 2026-11-26
+
+### Fixes
+
+- Read a keyless answer without the bot, carrier, satellite and service flags ([`dffe008`](https://github.com/internetdata/sdk-erlang/commit/dffe008d55e528fa9b6cf77f3ab93778f9a2b077))
+
 ## 1.21.0 - 2026-11-25
 
 ### Features
