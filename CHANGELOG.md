@@ -2,6 +2,12 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.23.0 - 2026-11-27
+
+### Fixes
+
+- Read a keyless answer without the AS's type ([`4b63a90`](https://github.com/internetdata/sdk-erlang/commit/4b63a9043e6c0dd6efb48bd142dfbda61fee463c))
+
 ## 1.22.0 - 2026-11-26
 
 ### Fixes
