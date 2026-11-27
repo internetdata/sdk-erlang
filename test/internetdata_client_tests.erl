@@ -327,6 +327,7 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
         {Ip, L#{<<"location">> => Loc#{<<"latitude">> => <<"1.5">>}}},
         {Ip, L#{<<"location">> => maps:remove(<<"timezone">>, Loc)}},
         {Ip, L#{<<"asn">> => Asn#{<<"asn">> => <<"5">>}}},
+        {Ip, L#{<<"asn">> => maps:remove(<<"name">>, Asn)}},
         {Ip, L#{<<"company">> => maps:remove(<<"domain">>, Company)}},
         {Ip, L#{<<"abuse">> => #{}}}, {Ip, L#{<<"tor">> => []}}, {Ip, L#{<<"web">> => [1]}},
         {Ip, L#{<<"web">> => [maps:remove(<<"port">>, Web)]}},
@@ -375,7 +376,10 @@ a_lookup_answer_of_the_wrong_shape_is_a_retried_server_error_test_() ->
         {?ENTITLEMENT_PATH, E#{<<"usage">> => Usage#{<<"window_start">> => <<"x">>}}},
         {?ENTITLEMENT_PATH, E#{<<"apikey">> => Key#{<<"expires">> => <<"monday">>}}},
         {?ENTITLEMENT_PATH, maps:remove(<<"plan">>, E)}
-    ] ++ [{Ip, L#{Flag => Value}} || Flag <- paid_flag_names(), Value <- [null, <<"false">>, 1]],
+    ] ++ [{Ip, L#{Flag => Value}} || Flag <- paid_flag_names(), Value <- [null, <<"false">>, 1]]
+      ++ [{Ip, L#{<<"asn">> => Asn#{<<"type">> => Value}}} || Value <- [null, 1, true, [], #{}]]
+      ++ [{<<"/domain/example.com">>, D#{<<"hosting">> => [Host#{<<"asn">> => HostAsn#{<<"type">> => Value}}]}}
+          || Value <- [null, 1, true]],
     Calls = lookup_calls(),
     [begin
          Body = iolist_to_binary(json:encode(Wire)),
@@ -1531,6 +1535,74 @@ assert_paid_flags_unanswered(Result) ->
     ?assertEqual(error, maps:find(is_bot, Result)),
     [?assertNot(maps:is_key(atom_to_binary(Flag), maps:get(raw, Result))) || Flag <- [is_bot | internetdata_stub:held_flags()]].
 
+%% Only a paid plan or the trial answers the AS's `type', so an answer without it is a real one. It
+%% reads empty, held at its `:=' type until the next major, as a bogon's does; `raw' carries the wire.
+an_answer_without_the_asn_type_is_read_test() ->
+    Wire = internetdata_stub:answer(<<"1.1.1.1">>),
+    ?assertNot(maps:is_key(<<"type">>, maps:get(<<"asn">>, Wire))),
+    Stub = internetdata_stub:start(#{<<"/1.1.1.1">> => #{body => Wire}, <<"/myip">> => #{body => Wire}}),
+    Client = internetdata:new(#{http => internetdata_stub:http(Stub), retries => 0, cache => false}),
+    [begin
+         {ok, Result} = Call(Client),
+         assert_asn_type_unanswered(Result)
+     end || Call <- [fun(C) -> internetdata:lookup(C, <<"1.1.1.1">>) end, fun internetdata:my_ip/1]],
+    ?assertEqual(2, internetdata_stub:calls(Stub)),
+    internetdata_stub:stop(Stub).
+
+an_answer_without_the_asn_type_is_read_in_a_batch_test() ->
+    Body = iolist_to_binary(json:encode(#{<<"results">> => #{
+        <<"1.1.1.1">> => internetdata_stub:answer(<<"1.1.1.1">>),
+        <<"8.8.8.8">> => internetdata_stub:answer(<<"8.8.8.8">>)}})),
+    Http = fun(_) -> {ok, #{status => 200, headers => [], body => Body}} end,
+    Client = internetdata:new(#{api_key => <<"k">>, retries => 0, http => Http, cache => false}),
+    Answers = internetdata:lookup_batch(Client, [<<"1.1.1.1">>, <<"8.8.8.8">>]),
+    ?assertEqual([<<"1.1.1.1">>, <<"8.8.8.8">>], lists:sort(maps:keys(Answers))),
+    [begin
+         {ok, Result} = maps:get(Ip, Answers),
+         assert_asn_type_unanswered(Result)
+     end || Ip <- [<<"1.1.1.1">>, <<"8.8.8.8">>]].
+
+assert_asn_type_unanswered(Result) ->
+    ?assertEqual({ok, <<>>}, maps:find(type, maps:get(asn, Result))),
+    ?assertNot(maps:is_key(<<"type">>, maps:get(<<"asn">>, maps:get(raw, Result)))).
+
+%% The AS's `type' a plan does answer is read as served, and one of another type is that address's
+%% error alone in a batch.
+the_asn_type_is_read_when_the_plan_answers_it_test() ->
+    Answered = (internetdata_stub:answer(<<"1.1.1.1">>))#{<<"asn">> => #{
+        <<"asn">> => 9009, <<"name">> => <<"M247">>, <<"domain">> => <<"m247global.com">>,
+        <<"type">> => <<"hosting">>, <<"prefix">> => <<"146.70.116.0/24">>}},
+    Stub = internetdata_stub:start(#{<<"/1.1.1.1">> => #{body => Answered}}),
+    {ok, Result} = internetdata:lookup(client(Stub), <<"1.1.1.1">>),
+    ?assertEqual({ok, <<"hosting">>}, maps:find(type, maps:get(asn, Result))),
+    internetdata_stub:stop(Stub).
+
+an_asn_type_of_the_wrong_type_fails_that_batch_entry_alone_test() ->
+    Entry = fun(Ip, Type) ->
+                    Wire = internetdata_stub:answer(Ip),
+                    Wire#{<<"asn">> => (maps:get(<<"asn">>, Wire))#{<<"type">> => Type}}
+            end,
+    Body = iolist_to_binary(json:encode(#{<<"results">> => #{
+        <<"1.1.1.1">> => Entry(<<"1.1.1.1">>, null),
+        <<"8.8.8.8">> => Entry(<<"8.8.8.8">>, 5),
+        <<"9.9.9.9">> => Entry(<<"9.9.9.9">>, <<"hosting">>)}})),
+    Http = fun(_) -> {ok, #{status => 200, headers => [], body => Body}} end,
+    Client = internetdata:new(#{api_key => <<"k">>, retries => 0, http => Http, cache => false}),
+    Answers = internetdata:lookup_batch(Client, [<<"1.1.1.1">>, <<"8.8.8.8">>, <<"9.9.9.9">>]),
+    ?assertMatch({error, #{kind := server_error, status := 200}}, maps:get(<<"1.1.1.1">>, Answers)),
+    ?assertMatch({error, #{kind := server_error, status := 200}}, maps:get(<<"8.8.8.8">>, Answers)),
+    ?assertMatch({ok, #{asn := #{type := <<"hosting">>}}}, maps:get(<<"9.9.9.9">>, Answers)).
+
+%% A domain's hosting entry carries the same `asn', so it is read without a `type' the same way.
+a_domain_host_asn_without_a_type_is_read_test() ->
+    D = domain_ok(),
+    #{<<"hosting">> := [#{<<"asn">> := HostAsn} = Host]} = D,
+    Without = D#{<<"hosting">> => [Host#{<<"asn">> => maps:remove(<<"type">>, HostAsn)}]},
+    Stub = internetdata_stub:start(#{<<"/domain/example.com">> => #{body => Without}}),
+    {ok, Result} = internetdata:lookup_domain(client(Stub), <<"example.com">>),
+    ?assertMatch([#{asn := #{asn := 64496, type := <<>>}}], maps:get(hosting, Result)),
+    internetdata_stub:stop(Stub).
+
 %% A flag a plan does answer is read as served, true or false.
 the_paid_flags_are_read_when_the_plan_answers_them_test() ->
     Answered = fun(Value) -> maps:merge(internetdata_stub:answer(<<"1.1.1.1">>),
@@ -1738,7 +1810,8 @@ lookup_ok() ->
           <<"dns_resolver">> => #{}, <<"bittorrent">> => #{},
           <<"location">> => (maps:get(<<"location">>, Wire))#{<<"city">> => <<"Vienna">>, <<"latitude">> => 48.2,
                                                               <<"longitude">> => 16, <<"accuracy_radius">> => 20},
-          <<"asn">> => (maps:get(<<"asn">>, Wire))#{<<"rpki_status">> => <<"valid">>, <<"country">> => <<"AT">>},
+          <<"asn">> => (maps:get(<<"asn">>, Wire))#{<<"type">> => <<"hosting">>, <<"rpki_status">> => <<"valid">>,
+                                                    <<"country">> => <<"AT">>},
           <<"company">> => (maps:get(<<"company">>, Wire))#{<<"type">> => <<"hosting">>, <<"country">> => <<"AT">>},
           <<"abuse">> => #{<<"email">> => <<"a@example.com">>, <<"phone">> => <<>>, <<"validated">> => false},
           <<"whois">> => #{<<"id">> => <<"i">>, <<"name">> => <<"n">>, <<"org">> => <<"o">>,

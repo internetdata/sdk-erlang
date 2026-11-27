@@ -171,6 +171,22 @@ a_missing_member_warns_once_or_fails_on_request_test() ->
                  internetdata_middleware:evaluate(Strict, view(undefined, #{}))),
     internetdata_stub:stop(Stub).
 
+%% The AS's `type' is a paid plan's: an answer that carries it is judged by it, and one without it,
+%% Unlimited's, is a plan gap reported by its path, whatever the condition names beside it.
+an_asn_type_condition_judges_a_served_type_and_reports_an_absent_one_test() ->
+    Options = #{ip_selector => fixed(?PUBLIC_IP), block_condition => #{asn => #{type => <<"hosting">>}},
+                on_missing_field => error},
+    Asn = (maps:get(<<"asn">>, internetdata_stub:answer(?PUBLIC_IP)))#{<<"type">> => <<"hosting">>},
+    {Paid, PaidCore} = serving(#{<<"asn">> => Asn}, Options),
+    ?assertMatch({ok, #{blocked := true}}, internetdata_middleware:evaluate(PaidCore, view(undefined, #{}))),
+    internetdata_stub:stop(Paid),
+    {Free, FreeCore} = serving(#{}, Options),
+    ?assertMatch({error, {missing_members, [<<"asn.type">>], _}},
+                 internetdata_middleware:evaluate(FreeCore, view(undefined, #{}))),
+    {ok, Lenient} = core(Free, Options#{on_missing_field => ignore}),
+    ?assertMatch({ok, #{blocked := false}}, internetdata_middleware:evaluate(Lenient, view(undefined, #{}))),
+    internetdata_stub:stop(Free).
+
 an_unresolvable_address_warns_and_does_not_block_test() ->
     Stub = internetdata_stub:start(#{}),
     Warnings = collector(),

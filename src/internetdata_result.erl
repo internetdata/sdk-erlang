@@ -24,7 +24,8 @@
 %% <b>The exception, until the next major:</b> `is_carrier', `is_satellite', `is_ssh',
 %% `is_smtp', `is_web', `is_dns_resolver' and `is_bittorrent' are always in the map, `false'
 %% on a plan that does not answer them (`is_bot' is absent there, as it was typed). Whether
-%% the plan answered one is `maps:is_key(&lt;&lt;"is_ssh"&gt;&gt;, maps:get(raw, Result))'.
+%% the plan answered one is `maps:is_key(&lt;&lt;"is_ssh"&gt;&gt;, maps:get(raw, Result))'. The same goes for
+%% `type' in `asn': an empty binary there where the plan does not answer it, as a bogon's is.
 -module(internetdata_result).
 
 -export([from_wire/1, bogon/1, asn/1, domain/1, entitlement/1]).
@@ -501,10 +502,17 @@ checksums(Wire) ->
 downloads(Wire) when is_list(Wire) ->
     [decode(download, Entry) || Entry <- Wire, is_map(Entry)].
 
+%% An address's `asn' is typed with a `type', which only a paid plan or the trial answers: it is held
+%% at that type until the next major, empty where the plan does not answer it.
+decode(asn, Wire) when is_map(Wire) ->
+    maps:merge(#{type => <<>>}, members(asn, Wire));
 decode(Context, Wire) when is_map(Wire) ->
-    maps:fold(fun(Name, Value, Acc) -> member(Context, Name, Value, Acc) end, #{}, Wire);
+    members(Context, Wire);
 decode(_Context, Wire) ->
     Wire.
+
+members(Context, Wire) ->
+    maps:fold(fun(Name, Value, Acc) -> member(Context, Name, Value, Acc) end, #{}, Wire).
 
 member(Context, Name, Value, Acc) ->
     case key(Context, Name) of

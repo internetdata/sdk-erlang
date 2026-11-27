@@ -132,9 +132,16 @@ assert_shape(#{<<"call">> := Call, <<"target">> := Target, <<"status">> := Statu
          false ->
              ?assertEqual({K, error}, {K, maps:find(atom(K), Result)})
      end || K <- maps:get(<<"absent">>, Expect)],
+    %% `asn.type' is held the same way: empty in the result, unsent in `raw'.
     maps:foreach(fun(Obj, Keys) ->
         Got = maps:get(atom(Obj), Result),
-        [?assertEqual({Obj, K, error}, {Obj, K, maps:find(atom(K), Got)}) || K <- Keys]
+        [case {Obj, K} of
+             {<<"asn">>, <<"type">>} ->
+                 ?assertEqual({Obj, K, {ok, <<>>}}, {Obj, K, maps:find(atom(K), Got)}),
+                 ?assertNot(maps:is_key(K, maps:get(Obj, maps:get(raw, Result))), K);
+             _ ->
+                 ?assertEqual({Obj, K, error}, {Obj, K, maps:find(atom(K), Got)})
+         end || K <- Keys]
     end, maps:get(<<"absentIn">>, Expect, #{})),
     ?assertEqual(1, internetdata_stub:calls(Stub)),
     internetdata:close(Client),
@@ -153,6 +160,7 @@ emptiness(Got) -> {not_empty, Got}.
 %% An AS answer's `whois' is keyed by the registry's own field names, so it is
 %% handed back as the wire carried it.
 decoded(<<"lookupAsn">>, <<"whois">>, Wire) -> Wire;
+decoded(<<"lookup">>, <<"asn">>, Wire) -> maps:merge(#{type => <<>>}, atoms(Wire));
 decoded(_Call, _Member, Wire) -> atoms(Wire).
 
 %% The wire's names as the atoms the result carries, at every depth.

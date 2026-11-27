@@ -7,7 +7,7 @@
 %%
 %% ```
 %% #{location => #{country => [<<"CU">>, <<"IR">>, <<"KP">>]}}
-%% #{asn => #{type => <<"hosting">>}}
+%% #{asn => #{type => <<"hosting">>}}      % a paid plan's member, reported by its path on Unlimited
 %% #{is_vpn => true, vpn => #{provider => <<"nordvpn">>}}
 %% #{is_resproxy => true, resproxy => #{hits => #{gte => 5}}}
 %% [#{is_hosting => true}, #{is_cdn => true}]   % a list is OR

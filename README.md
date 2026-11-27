@@ -14,11 +14,11 @@ It tells you what every database InternetData publishes says about an IP address
 {deps, [internetdata]}.
 ```
 
-Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.22"}` to your `mix.exs` deps and call it as `:internetdata`.
+Requires Erlang/OTP 27 or newer. There are no runtime dependencies: everything the client needs is in OTP. From Elixir, add `{:internetdata, "~> 1.23"}` to your `mix.exs` deps and call it as `:internetdata`.
 
 ## Usage
 
-**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn`, `is_anycast`, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
+**No API key needed to start.** Unlimited, the free plan, answers `ip`, `is_bogon`, Tor and relay detection, country-level `location`, `asn` without its `type`, `is_anycast`, the reverse-DNS `hostname`, the company's name and domain and the abuse email, with no daily or monthly cap, with a key or without one.
 
 ```erlang
 Client = internetdata:new(),
@@ -33,7 +33,7 @@ Every call answers `{ok, Term}` or `{error, Error}`. A client holds a cache, whi
 
 ### With an API key
 
-A paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the `user_agent` verdict on a user agent you send with the lookup, the city-level location, the company's type, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. Its quotas differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
+A paid plan answers every field: `is_vpn`, `is_hosting`, `is_cdn` and the four proxy flags as well, the detail behind each flag (`bot` names whose crawler, monitor or scanner uses the address, and whether its operator vouches for it), the `user_agent` verdict on a user agent you send with the lookup, the city-level location, the company's type and the AS's, the whole abuse contact, the whois records and the hosted domains, a count and the 10 most popular. Its quotas differ only in how many lookups they include, and a free account tries every field. Create a key in the [console](https://app.internetdata.io), then pass it in:
 
 ```erlang
 Client = internetdata:new(#{api_key => <<"your-api-key">>}),
@@ -351,9 +351,9 @@ Each redirect URI must be https on a public host name, or http on a loopback add
 
 ### Absent is not false
 
-Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn`, the proxy flags with the detail behind them, `is_bot`, `is_carrier`, `is_satellite`, `is_ssh`, `is_smtp`, `is_web`, `is_dns_resolver`, `is_bittorrent` and the detail behind each, and inside `location`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
+Unlimited leaves out `is_vpn`, `is_hosting`, `is_cdn`, the proxy flags with the detail behind them, `is_bot`, `is_carrier`, `is_satellite`, `is_ssh`, `is_smtp`, `is_web`, `is_dns_resolver`, `is_bittorrent` and the detail behind each, and inside `location`, `asn`, `company` and `abuse` the members only a paid plan answers, such as `city`, `type` and `phone`; a free-plan key's answer carries `trial_expired`, true once its trial is spent. A paid key's carries `cap_reached`, true once its organization's overage cap is reached, when the answer has Unlimited's fields and isn't billed. Fields your plan does not include are simply not in the result map. Absent means "not in your plan"; a present `false` means "we checked, and no".
 
-One exception, until the next major release: `is_carrier`, `is_satellite`, `is_ssh`, `is_smtp`, `is_web`, `is_dns_resolver` and `is_bittorrent` are always in the result map, and read `false` where the plan does not answer them. `maps:is_key(<<"is_ssh">>, maps:get(raw, Result))` tells whether it did. `is_bot` is simply absent there.
+One exception, until the next major release: `is_carrier`, `is_satellite`, `is_ssh`, `is_smtp`, `is_web`, `is_dns_resolver` and `is_bittorrent` are always in the result map, and read `false` where the plan does not answer them. `maps:is_key(<<"is_ssh">>, maps:get(raw, Result))` tells whether it did. `is_bot` is simply absent there. The same goes for `type` inside `asn`: it reads an empty binary where the plan does not answer it, and `raw` tells whether it did.
 
 ```erlang
 maps:get(is_vpn, Result, false).          % when you only want the flag

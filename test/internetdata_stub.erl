@@ -46,8 +46,7 @@ answer(Ip) ->
                                <<"currency_symbol">>, <<"flag_emoji">>, <<"flag_unicode">>], <<>>),
     Flags = maps:from_keys([<<"is_bogon">>, <<"is_tor">>, <<"is_relay">>, <<"is_anycast">>], false),
     Flags#{<<"ip">> => Ip, <<"tor">> => #{}, <<"relay">> => #{}, <<"location">> => Location,
-           <<"asn">> => #{<<"asn">> => 0, <<"name">> => <<>>, <<"domain">> => <<>>, <<"type">> => <<>>,
-                          <<"prefix">> => <<>>},
+           <<"asn">> => #{<<"asn">> => 0, <<"name">> => <<>>, <<"domain">> => <<>>, <<"prefix">> => <<>>},
            <<"company">> => #{<<"name">> => <<>>, <<"domain">> => <<>>},
            <<"hostname">> => <<>>, <<"abuse">> => #{<<"email">> => <<>>}}.
 

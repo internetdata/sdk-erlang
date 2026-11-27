@@ -1095,7 +1095,8 @@ download() ->
 %% The lookup answers' shapes, by the same rule. A detail is `{}' under a false
 %% flag, and the spec requires none of its members; a plan's own members are
 %% optional within the objects every answer carries, which are always whole.
-%% `plan' marks the eight flags only a paid plan or the trial answers: absent, never null.
+%% `plan' marks the eight flags and the AS's `type', which only a paid plan or the trial answers:
+%% absent, never null.
 %% Every seen day is a `date' (spec 2026.11.23) but three that may be empty:
 %% `pubproxy.last_usable', `bittorrent.last_reachable' and a domain's `web.last_seen'.
 lookup_shape() ->
@@ -1244,10 +1245,10 @@ domain_shape() ->
               {<<"trial_expired">>, boolean, false}, {<<"cap_reached">>, boolean, false}]}.
 
 %% An address answer's `asn', which a domain answer's `hosting' carries for each
-%% of its addresses.
+%% of its addresses. Its `type' is a paid plan's.
 asn_member_shape() ->
     {object, [{<<"asn">>, integer, true}, {<<"name">>, string, true}, {<<"domain">>, string, true},
-              {<<"type">>, string, true}, {<<"prefix">>, string, true},
+              {<<"type">>, string, plan}, {<<"prefix">>, string, true},
               {<<"country">>, string, false}, {<<"rpki_status">>, string, false}]}.
 
 entitlement_shape() ->
