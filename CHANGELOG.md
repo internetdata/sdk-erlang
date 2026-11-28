@@ -2,6 +2,18 @@
 
 What each release changed for you, newest first. Each line is a commit's summary, linked to its full description and diff. Releases before 1.6.1 are described by their release commits.
 
+## 1.24.0 - 2026-11-28
+
+### Features
+
+- Middleware: allow_bots sends only a crawler's User-Agent, at most four an address ([`5972649`](https://github.com/internetdata/sdk-erlang/commit/59726490fca04bf932fd91f22148d98ad35a1e9a))
+
+### Fixes
+
+- Middleware: a condition on the verdict is no plan gap for a request that sent no agent ([`2dc1a1e`](https://github.com/internetdata/sdk-erlang/commit/2dc1a1e01e39edd971d64ee92d15fc480f9bb39c))
+- Middleware: a bogon's answer reports no missing member ([`d9fb0b4`](https://github.com/internetdata/sdk-erlang/commit/d9fb0b463b71723cd614c22e32dc50d89f010b0c))
+- Spec 2026.11.27: the free plan's trial is a window, and no comment names a figure ([`ecb7007`](https://github.com/internetdata/sdk-erlang/commit/ecb700741c01a72d8460f91b54f2a0f3c3297b4b))
+
 ## 1.23.0 - 2026-11-27
 
 ### Fixes
