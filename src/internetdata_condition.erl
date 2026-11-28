@@ -55,9 +55,12 @@ matches(Condition, Result) ->
 %% one is reported: `vpn' present but `#{}' is not a plan gap. A populated object
 %% carries every member the plan includes, so a member missing there is one.
 %%
-%% A locally answered bogon needs no special case: it is synthesized in the
-%% widest shape, so every member is present and nothing reads as missing.
+%% A bogon's answer reports nothing missing: it is synthesized in the widest
+%% shape, so every member is present but a user agent's verdict, which no plan
+%% gap explains.
 -spec missing_members(conditions(), internetdata_result:result()) -> [binary()].
+missing_members(_Condition, #{is_bogon := true}) ->
+    [];
 missing_members(Condition, Result) ->
     Raw = maps:get(raw, Result, #{}),
     lists:foldl(fun(One, Acc) -> collect_missing(One, Raw, <<>>, Acc) end, [], wrap(Condition)).

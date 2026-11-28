@@ -145,6 +145,21 @@ a_condition_on_the_verdict_is_no_plan_gap_for_a_request_that_sent_no_agent_test(
     {ok, _} = internetdata_middleware:evaluate(Off, view(#{})),
     ?assertMatch([_], [W || W <- seen(OffWarnings), binary:match(W, <<"user_agent">>) =/= nomatch]).
 
+%% A bogon peer, local development behind no proxy, is answered locally in the
+%% widest shape and carries no verdict, and that is no plan gap: `on_missing_field'
+%% set to `error' used to fail a crawler's request there, and `warn' to say the
+%% plan lacks what it never served.
+a_bogon_peer_with_a_crawler_agent_is_no_plan_gap_test_() ->
+    Forged = #{user_agent => #{verdict => <<"spoofed">>}},
+    [{binary_to_list(Peer) ++ " " ++ atom_to_list(Action), fun() ->
+        {Core, Seen, Warnings} = core(#{allow_bots => true, block_condition => Forged,
+                                        on_missing_field => Action}),
+        {ok, Found} = internetdata_middleware:evaluate(Core, view(#{<<"user-agent">> => ?GOOGLEBOT}, Peer)),
+        ?assertMatch(#{blocked := false, result := #{is_bogon := true}}, Found),
+        ?assertEqual([], agents(Seen)),
+        ?assertEqual([], [W || W <- seen(Warnings), binary:match(W, <<"does not include">>) =/= nomatch])
+     end} || Peer <- [<<"127.0.0.1">>, <<"10.0.0.1">>, <<"::1">>], Action <- [error, warn]].
+
 %% Held an hour from an address's first agent, whatever is added after, and no
 %% more than a bounded number of addresses.
 a_cache_holds_claims_from_the_first_for_a_bounded_set_of_keys_test() ->
